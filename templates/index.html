@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据分析前端</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Modal 样式 */
+       .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.4);
+        }
+
+       .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 60%;
+            max-height: 70%;
+            overflow-y: auto;
+        }
+
+       .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+       .close:hover,
+       .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        /* 滚动区域 */
+        #sample-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>数据分析前端</h1>
+
+    <!-- 文件上传部分 -->
+    <h2>文件上传</h2>
+    <input type="file" id="fileInput" />
+    <button onclick="uploadFile()">上传文件</button>
+    <br>
+    <p id="fileIdMessage"></p>
+
+    <!-- 样本选择部分 -->
+    <h2>选择样本行</h2>
+    <button onclick="openSampleSelectionModal()">选择样本</button>
+    <br>
+    <p id="selectedSamplesMessage"></p>
+
+    <!-- 波形图生成部分 -->
+    <h2>生成波形图</h2>
+    <button onclick="generateWaveform()">生成波形图</button>
+    <canvas id="waveform-chart" width="400" height="200"></canvas>
+
+    <!-- 加入样本库部分 -->
+    <h2>加入样本库</h2>
+    <button onclick="addToSampleLibrary()">加入样本库</button>
+
+    <!-- 样本选择 Modal -->
+    <div id="sampleModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeSampleSelectionModal()">&times;</span>
+            <h3>选择样本</h3>
+            <!-- 全选复选框 -->
+            <input type="checkbox" id="selectAll" onclick="toggleAllSamples()"> 全选
+            <div id="sampleList"></div>
+            <button onclick="confirmSampleSelection()">确认选择</button>
+        </div>
+    </div>
+
+    <script>
+        let uploadedFileId = null;
+        let selectedSampleIdsArray = [];
+
+        // 上传文件
+        function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('请选择一个文件');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            $.ajax({
+                url: '/api/analysis/train/select/import',
+                method: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function (response) {
+                    if (response.state === 200) {
+                        uploadedFileId = response.data.file_id;
+                        $('#fileIdMessage').text('文件上传成功，文件ID: ' + uploadedFileId);
+                    } else {
+                        alert(response.message);
+                    }
+                },
+                error: function (err) {
+                    alert('上传失败');
+                }
+            });
+        }
+
+        // 打开选择样本的 Modal
+        function openSampleSelectionModal() {
+            if (!uploadedFileId) {
+                alert('请先上传文件');
+                return;
+            }
+
+            $.ajax({
+                url: '/api/analysis/train/select/sample',
+                method: 'GET',
+                data: {
+                    file_id: uploadedFileId
+                },
+                success: function (response) {
+                    if (response.state === 200) {
+                        const samples = response.data.samples;
+
+                        // 清空现有样本列表
+                        const sampleListDiv = document.getElementById('sampleList');
+                        sampleListDiv.innerHTML = '';
+
+                        samples.forEach(sample => {
+                            const checkbox = document.createElement('input');
+                            checkbox.type = 'checkbox';
+                            checkbox.value = sample.original_sample_id;
+                            checkbox.id = sample.original_sample_id;
+
+                            const label = document.createElement('label');
+                            label.setAttribute('for', sample.original_sample_id);
+                            label.innerText = sample.sample_name;
+
+                            const div = document.createElement('div');
+                            div.appendChild(checkbox);
+                            div.appendChild(label);
+
+                            sampleListDiv.appendChild(div);
+                        });
+
+                        // 打开模态框
+                        document.getElementById('sampleModal').style.display = 'block';
+                    } else {
+                        alert(response.message);
+                    }
+                },
+                error: function (err) {
+                    alert('选择样本失败');
+                }
+            });
+        }
+
+        // 关闭选择样本的 Modal
+        function closeSampleSelectionModal() {
+            document.getElementById('sampleModal').style.display = 'none';
+        }
+
+        // 全选 / 取消全选
+        function toggleAllSamples() {
+            const isChecked = document.getElementById('selectAll').checked;
+            const checkboxes = document.querySelectorAll('#sampleList input[type="checkbox"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = isChecked;
+            });
+        }
+
+        // 确认选择样本
+        function confirmSampleSelection() {
+            selectedSampleIdsArray = [];
+            const checkboxes = document.querySelectorAll('#sampleList input[type="checkbox"]:checked');
+            checkboxes.forEach(checkbox => {
+                selectedSampleIdsArray.push(checkbox.value);
+            });
+
+            if (selectedSampleIdsArray.length === 0) {
+                alert('请选择至少一个样本');
+                return;
+            }
+
+            // 显示已选择的样本 ID
+            document.getElementById('selectedSamplesMessage').innerText = '已选择样本 ID: ' + selectedSampleIdsArray.join(', ');
+
+            // 关闭模态框
+            closeSampleSelectionModal();
+        }
+
+        // 生成波形图
+        function generateWaveform() {
+            if (selectedSampleIdsArray.length === 0 ||!uploadedFileId) {
+                alert('请选择样本 ID 和文件 ID');
+                return;
+            }
+
+            $.ajax({
+                url: '/api/analysis/train/select/wave',
+                method: 'GET',
+                data: {
+                    file_id: uploadedFileId,
+                    samples_ids: selectedSampleIdsArray
+                },
+                success: function (response) {
+                    if (response.state === 200) {
+                        const waveData = response.data;
+
+                        // 构造波形图数据
+                        const labels = waveData.map(wave => wave.timestamp);
+                        const datasets = waveData.map(wave => ({
+                            label: wave.sample_id,
+                            data: wave.wave_values,
+                            fill: false,
+                            borderColor: 'rgb(75, 192, 192)',
+                            tension: 0.1
+                        }));
+
+                        // 创建图表
+                        const ctx = document.getElementById('waveform-chart').getContext('2d');
+                        new Chart(ctx, {
+                            type: 'line',
+                            data: {
+                                labels: labels,
+                                datasets: datasets
+                            },
+                            options: {
+                                scales: {
+                                    x: {
+                                        type: 'category'
+                                    },
+                                    y: {
+                                        beginAtZero: true
+                                    }
+                                }
+                            }
+                        });
+                    } else {
+                        alert(response.message);
+                    }
+                },
+                error: function (err) {
+                    alert('生成波形图失败');
+                }
+            });
+        }
+
+        // 加入样本库
+        function addToSampleLibrary() {
+            if (selectedSampleIdsArray.length === 0 ||!uploadedFileId) {
+                alert('请选择样本 ID 和文件 ID');
+                return;
+            }
+
+            $.ajax({
+                url: '/api/analysis/train/select/add/sample',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    file_id: uploadedFileId,
+                    sample_ids: selectedSampleIdsArray.join(',')
+                }),
+                success: function (response) {
+                    if (response.state === 200) {
+                        alert('样本加入成功');
+                    } else {
+                        alert(response.message);
+                    }
+                },
+                error: function (err) {
+                    alert('加入样本库失败');
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>

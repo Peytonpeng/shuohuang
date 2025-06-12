@@ -1,0 +1,6 @@
+# Python
+__pycache__/
+*.pyc
+
+# IntelliJ IDEA files (建议也忽略，避免提交IDE配置)
+.idea/

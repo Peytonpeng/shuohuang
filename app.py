@@ -259,7 +259,7 @@ def get_db_connection():
         return None
 
 
-@app.route('/api/login/token', methods=['POST'])
+@app.route('/api/analysis/login/token', methods=['POST'])
 def token():
     # 获得系统token
     SystemToken = request.headers.get('SystemToken')
@@ -2168,7 +2168,8 @@ def start_model_training():  # 函数名已更新
         return jsonify({"state": 400, "message": "无效的输入数据"}), 400
 
     # 从前端获取room_id
-    room_id = data.get("room_id",session.get('room'))
+    # room_id = data.get("room_id",session.get('room'))
+    room_id = session.get("room_id")
     if not room_id:
         return jsonify({"state": 400, "message": "请求的JSON数据中必须包含 'room_id' 字段作为 WebSocket 房间ID"}), 400
 

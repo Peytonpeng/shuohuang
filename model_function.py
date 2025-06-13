@@ -505,14 +505,30 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
                            'progress_percent': 50})
 
     # --- 模型参数 ---
+    #DNN:
     num_classes_param = param_data.get("num_classes", len(y_final_series.unique()))
+    num_rounds_param = param_data.get("num_rounds", 5)
     lr_param = param_data.get("lr", 0.001)
+    epochs_per_round_param = param_data.get("epochs_per_round", 200)
+    #随机森林：
     n_estimators_param = param_data.get("n_estimators", 100)
-    num_rounds_param = param_data.get("num_rounds", 1)
-    epochs_per_round_param = param_data.get("epochs_per_round", 100)
+    #逻辑回归：
+    lr_max_iter = param_data.get("lr_max_iter", 1000)
+    lr_C = param_data.get("lr_C", 1.0) # Inverse of regularization strength
+    lr_solver = param_data.get("lr_solver", 'lbfgs') # 'lbfgs', 'liblinear', 'newton-cg', 'sag', 'saga'
+    #支持向量机：
+    svc_C = param_data.get("svc_C", 1.0) # Regularization parameter
+    svc_kernel = param_data.get("svc_kernel", 'rbf') # 'linear', 'poly', 'rbf', 'sigmoid', 'precomputed'
+    svc_gamma = param_data.get("svc_gamma", 'scale') # Kernel coefficient ('scale' or 'auto' or float)
+    #线性回归：
+    lr_fit_intercept = param_data.get("lr_fit_intercept", True)  # Whether to calculate the intercept
+    #聚类：
+    kmeans_n_clusters_param = param_data.get("kmeans_n_clusters", num_classes_param if num_classes_param > 0 else 2)
+
+
+
     dnn_hidden_dims = param_data.get("dnn_hidden_dims", [128, 64])
     dnn_dropout_rate = param_data.get("dnn_dropout_rate", 0.5)
-    kmeans_n_clusters_param = param_data.get("kmeans_n_clusters", num_classes_param if num_classes_param > 0 else 2)
 
     # --- 划分数据集 ---
     stratify_option = y_final_series if len(y_final_series.unique()) > 1 and all(
@@ -522,10 +538,10 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
 
     # --- 模型配置 ---
     models_config = {
-        '线性回归': LinearRegression(),
-        '逻辑回归': LogisticRegression(max_iter=1000, solver='liblinear', random_state=42),
+        '线性回归': LinearRegression(fit_intercept=lr_fit_intercept),
+        '逻辑回归': LogisticRegression(max_iter=lr_max_iter, C=lr_C, solver=lr_solver, random_state=42),
         '随机森林': RandomForestClassifier(n_estimators=n_estimators_param, random_state=42),
-        '支持向量机': SVC(probability=True, random_state=42),
+        '支持向量机': SVC(probability=True, C=svc_C, kernel=svc_kernel, gamma=svc_gamma, random_state=42),
         'K-均值聚类': KMeans(n_clusters=kmeans_n_clusters_param, n_init='auto', random_state=42),
         '深度神经网络': 'generic_dnn_placeholder'
     }

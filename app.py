@@ -896,8 +896,7 @@ def preprocess_confirm():
                     raise json.JSONDecodeError("不是有效的 JSON 列表", original_data_str, 0)
 
                 # 提取原始列名，用于生成 preprocess_sample_id
-                original_column_name = sample["sample_name"].split('_')[-1] if '_' in sample["sample_name"] else sample[
-                    "sample_name"]
+                original_column_name = sample["sample_name"]
 
                 # 保留 before_process_data 结构
                 before_process_data = {
@@ -941,7 +940,8 @@ def preprocess_confirm():
 
                 # 生成 preprocess_sample_id，保留原始列名后缀
                 preprocess_sample_id_base = original_id
-                new_preprocess_sample_id = f"{preprocess_sample_id_base}_{original_column_name}"
+                # 修改数据表命名规则
+                new_preprocess_sample_id = f"{preprocess_sample_id_base}--{original_column_name}"
 
                 # 将实际成功应用的 methods 列表转换为 JSON 字符串，用于数据库存储
                 applied_methods_final_json = json.dumps(applied_methods_list_for_log, ensure_ascii=False)
@@ -1327,7 +1327,7 @@ def feature_confirm():
         processed_count = 0
         total_samples = len(sample_ids)
 
-        for sample_id in sample_ids:
+        for  sample_id in sample_ids:
             processed_count += 1
             if not sample_id:
                 logging.warning("在样本ID列表中发现一个空ID，已跳过。")
@@ -1336,7 +1336,9 @@ def feature_confirm():
 
             original_sample_data_str = None
             sample_type = None
-            determined_legend_text = str(sample_id)
+            determined_legend_text = str(sample_id).split('--')[-1]
+            # 修改feature_extract字段赋值：sample_name+feature_method
+            feature_extract_field_value = f"{determined_legend_text}_{feature_method}" if feature_method else determined_legend_text
 
             cursor.execute(
                 "SELECT original_sample_id, sample_data, sample_name FROM tb_analysis_sample_original WHERE original_sample_id = %s",
@@ -1350,6 +1352,7 @@ def feature_confirm():
                 else:
                     original_sample_data_str = original_sample_row["sample_data"]
                     sample_type = "1"
+                    # 定义
                     determined_legend_text = original_sample_row.get("sample_name")
                     if not determined_legend_text:
                         determined_legend_text = str(sample_id)
@@ -1689,9 +1692,10 @@ def feature_confirm():
                 data_json_db = json.dumps(data_to_store_in_db,
                                           ensure_ascii=False)  # Store potentially multi-dimensional data
 
+                # 执行插入操作
                 cursor.execute(insert_sql, (
                     feature_sample_id, sample_id, sample_type,
-                    feature_method or '无', params_json_for_db, '无',
+                    feature_extract_field_value, params_json_for_db, '无',
                     data_json_db, current_user, datetime.datetime.now(),
                 ))
                 logging.info(f"样本ID {sample_id} 的特征数据已成功准备好插入 (from_sample_id = {sample_id})。")

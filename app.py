@@ -2374,7 +2374,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
     model_definition_id = base_model_train_id_for_process
     conn = get_db_connection()
     if conn is None:
-        emit_process_error(websocket_session_id, "数据库连接失败")
+        emit_process_error(websocket_session_id,'training', "数据库连接失败")
         return
 
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -2386,7 +2386,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
         cursor.execute("SELECT model_name FROM tb_analysis_model WHERE model_id = %s", (model_id_from_request,))
         model_info_result = cursor.fetchone()
         if model_info_result is None:
-            emit_process_error(websocket_session_id, f"模型ID {model_id_from_request} 未找到")
+            emit_process_error(websocket_session_id,'training', f"模型ID {model_id_from_request} 未找到")
             return
         actual_model_name_for_training = model_info_result["model_name"]
 
@@ -2426,7 +2426,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
         if is_error:
             error_msg = result_dict_from_train.get('message', '训练期间发生未知错误')
             logger.error(f"训练失败: {error_msg}")
-            emit_process_error(websocket_session_id, error_msg)
+            emit_process_error(websocket_session_id,'training', error_msg)
 
             # 更新训练会话状态为错误
             if websocket_session_id in training_sessions:
@@ -2485,7 +2485,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
         import traceback
         error_msg = f"run_training_with_websocket 发生意外错误: {e}"
         logger.error(f"{error_msg}\n{traceback.format_exc()}")
-        emit_process_error(websocket_session_id, error_msg)
+        emit_process_error(websocket_session_id,'training', error_msg)
 
         # 更新训练会话状态为错误
         if websocket_session_id in training_sessions:

@@ -126,7 +126,7 @@ def emit_round_result(room_id, data):  # 参数名改为 room_id
         payload = {
             'room_id': room_id,
             'process_type': 'training',
-            'sub_type': 'epoch_result',
+            'sub_type': 'round_result',
             'timestamp': datetime.datetime.now().isoformat(),
             **data
         }

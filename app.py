@@ -4,6 +4,8 @@ import torch
 from flask import Flask, request, jsonify, render_template, session
 import threading
 from flask_socketio import SocketIO, emit, join_room, leave_room
+
+import model_function
 # 先导入set_socketio_instance，后面设置完emit函数后再导入train_model
 from model_function import set_socketio_instance
 import pandas as pd
@@ -115,7 +117,7 @@ def emit_epoch_result(room_id, data):  # 参数名改为 room_id
             **data
         }
         socketio.emit('process_result', payload, namespace='/ns_analysis', room=room_id)
-        logger.debug(f"发送epoch结果到房间 {room_id} (ns /ns_analysis): epoch {data.get('global_epoch', '')}")
+        logger.info(f"发送epoch结果到房间 {room_id} (ns /ns_analysis): epoch {data.get('global_epoch', '')}")
     except Exception as e:
         logger.error(f"发送epoch结果消息失败 (房间 {room_id}): {e}", exc_info=True)
 
@@ -226,7 +228,8 @@ emit_funcs = {
     'training_error': emit_process_error
 }
 set_emit_functions(emit_funcs)
-
+#定义全局变量：存储活跃训练会话及其关联的线程和停止事件
+active_training_processes = {}
 # 在设置完emit函数后导入train_model
 from model_function import train_model
 
@@ -2166,21 +2169,24 @@ def get_model_data():
 # 6.7
 @app.route('/api/analysis/train/train/start', methods=['POST'])
 @token_required
-def start_model_training():  # 函数名已更新
+def start_model_training():
     data = request.get_json()
     if not data:
         return jsonify({"state": 400, "message": "无效的输入数据"}), 400
 
-    # 从前端获取room_id
-    # room_id = data.get("room_id",session.get('room'))
     room_id = session.get("room_id")
     if not room_id:
-        return jsonify({"state": 400, "message": "请求的JSON数据中必须包含 'room_id' 字段作为 WebSocket 房间ID"}), 400
+        # 如果 room_id 不在 session 中，则回退，或者您可以要求它在请求中
+        room_id = data.get("room_id") # 尝试从请求体中获取
+        if not room_id:
+            return jsonify({"state": 400, "message": "请求的JSON数据中必须包含 'room_id' 字段作为 WebSocket 房间ID"}), 400
+        session['room_id'] = room_id # 将其设置到 session 中以保持一致性
+
 
     model_id_req = data.get("model_id", "")
     param_data_req = data.get("param_data", {})
     sample_data_input_list = data.get("sample_data", [])
-    create_user_req = "system"  # Or from authenticated user
+    create_user_req = "system"
     create_time_req = datetime.datetime.now()
 
     conn = get_db_connection()
@@ -2263,6 +2269,7 @@ def start_model_training():  # 函数名已更新
                 param_data_req["num_classes"] = num_unique_labels_generated
 
         final_feature_data_json_for_training = json.dumps(processed_feature_list_for_training)
+        # **使用 UUID 为每次训练生成唯一的实例 ID
         current_training_instance_id = str(uuid.uuid4())
         param_data_req_json = json.dumps(param_data_req)
 
@@ -2297,7 +2304,15 @@ def start_model_training():  # 函数名已更新
         # 生成WebSocket会话ID
         websocket_session_id = room_id
 
-        # 存储训练会话信息
+        stop_event = threading.Event()
+        # **存储线程对象和停止事件，以便后续通过 ID 访问**
+        # 初始时线程对象可以为 None，启动后更新
+        active_training_processes[current_training_instance_id] = {
+            "thread": None,
+            "stop_event": stop_event
+        }
+
+        # 存储训练会话信息 (便于前端查询状态)
         training_sessions[websocket_session_id] = {
             "training_instance_id": current_training_instance_id,
             "model_name": actual_model_name,
@@ -2306,29 +2321,33 @@ def start_model_training():  # 函数名已更新
             "progress": 0
         }
 
-        # 在后台线程中启动训练
+        # 在后台线程中启动训练，并传递停止事件
         training_thread = threading.Thread(
             target=run_training_with_websocket,
             args=(
-                current_training_instance_id,  # 传递 training_instance_id
+                current_training_instance_id,
                 model_id_req,
                 final_feature_data_json_for_training,
                 model_definition_id_from_tb_model,
                 param_data_req,
-                websocket_session_id
+                websocket_session_id,
+                stop_event # **传递停止事件**
             )
         )
         training_thread.daemon = True
         training_thread.start()
+
+        # **将实际的线程对象存储到 active_training_processes 中**
+        active_training_processes[current_training_instance_id]["thread"] = training_thread
 
         return jsonify({
             "state": 200,
             "data": {
                 "success": "true",
                 "message": "训练已启动",
-                "training_instance_id": websocket_session_id,
+                "training_id": current_training_instance_id, # **返回这个 ID 给前端**
                 "websocket": {
-                    "session_id": "前端room_id",
+                    "session_id": websocket_session_id, # **这里使用变量，而不是硬编码字符串**
                     "namespace": "/ns_analysis",
                     "events": {
                         "progress": "training_progress",
@@ -2362,9 +2381,9 @@ def start_model_training():  # 函数名已更新
         if 'conn' in locals() and conn and not conn.closed:
             conn.close()
 
-
+# --- **修改后的 run_training_with_websocket 函数：接受 stop_event 并进行清理** ---
 def run_training_with_websocket(current_training_instance_id, model_id_from_request, sample_data_json_with_labels,
-                                base_model_train_id_for_process, full_param_data, websocket_session_id):
+                                base_model_train_id_for_process, full_param_data, websocket_session_id, stop_event):
     """
     带WebSocket通信的训练执行函数
     """
@@ -2375,6 +2394,9 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
     conn = get_db_connection()
     if conn is None:
         emit_process_error(websocket_session_id,'training', "数据库连接失败")
+        # **如果数据库连接失败，也要清理 active_training_processes 中的条目**
+        if websocket_session_id in active_training_processes:
+            del active_training_processes[current_training_instance_id]
         return
 
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -2382,7 +2404,6 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
     actual_model_name_for_training = "Unknown"
 
     try:
-        # 获取模型名称
         cursor.execute("SELECT model_name FROM tb_analysis_model WHERE model_id = %s", (model_id_from_request,))
         model_info_result = cursor.fetchone()
         if model_info_result is None:
@@ -2390,18 +2411,12 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
             return
         actual_model_name_for_training = model_info_result["model_name"]
 
-        # 更新训练会话状态
         if websocket_session_id in training_sessions:
             training_sessions[websocket_session_id].update({
                 "status": "training",
                 "model_name": actual_model_name_for_training
             })
 
-        # 设置 model_function 模块的 socketio 实例和 emit 函数
-        set_socketio_instance(socketio)
-
-
-        # 发送训练开始消息
         emit_process_progress(websocket_session_id, 'training',{
             "status": "started",
             "message": f"开始 {actual_model_name_for_training} 模型训练",
@@ -2411,24 +2426,40 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
         logger.info(
             f"开始 {actual_model_name_for_training} 模型训练 (训练实例ID: {current_training_instance_id}, 定义 ID: {model_definition_id})")
 
-        # --- 调用 train_model 函数，修正参数名 ---
-        trained_model_instance, result_dict_from_train = train_model(
+        # **调用 train_model 函数，传递 stop_event**
+        trained_model_instance, result_dict_from_train = model_function.train_model(
             json_data=sample_data_json_with_labels,
             label_column="label",
             model_name=actual_model_name_for_training,
             param_data=full_param_data,
-            training_id=websocket_session_id  # 修正：使用正确的参数名
+            training_id=websocket_session_id,
+            stop_event=stop_event # **传递 stop_event**
         )
 
-        # 检查训练结果
+        # 检查训练结果，首先判断是否是用户中止
+        is_stopped_by_user = stop_event.is_set()
         is_error = 'error' in result_dict_from_train or '失败' in result_dict_from_train.get('message', '').lower()
 
-        if is_error:
+        if is_stopped_by_user:
+            message = "训练已中止"
+            logger.info(f"训练 {current_training_instance_id} 已由用户中止。")
+            emit_process_completed(websocket_session_id, 'training', {
+                "message": message,
+                "status": "stopped",
+                "end_time": datetime.datetime.now().isoformat()
+            })
+            # 更新训练会话状态为“中止”
+            if websocket_session_id in training_sessions:
+                training_sessions[websocket_session_id].update({
+                    "status": "stopped",
+                    "end_time": datetime.datetime.now().isoformat(),
+                    "progress": training_sessions[websocket_session_id].get("progress", 0) # 保留最后进度
+                })
+        elif is_error:
             error_msg = result_dict_from_train.get('message', '训练期间发生未知错误')
             logger.error(f"训练失败: {error_msg}")
             emit_process_error(websocket_session_id,'training', error_msg)
 
-            # 更新训练会话状态为错误
             if websocket_session_id in training_sessions:
                 training_sessions[websocket_session_id].update({
                     "status": "error",
@@ -2437,7 +2468,6 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
                 })
             conn.rollback()
         else:
-            # 训练成功，保存结果到数据库
             process_record_id_val = current_training_instance_id
             happen_time_process = datetime.datetime.now()
             try:
@@ -2446,7 +2476,6 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
                 logger.error(f"错误: 训练结果无法序列化: {e}", exc_info=True)
                 process_data_json_to_db = json.dumps({"error": f"结果序列化失败: {e}"})
 
-            # 插入或更新训练结果
             query_insert_train_process = """
             INSERT INTO tb_analysis_model_train_process
             (model_train_id, happen_time, process_data, create_user, create_time)
@@ -2464,7 +2493,6 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
             conn.commit()
             logger.info(f"最终训练结果已保存 (ID: {process_record_id_val})。")
 
-            # 发送训练完成消息
             end_time = datetime.datetime.now()
             emit_process_completed(websocket_session_id,'training', {
                 "message": f"模型训练过程结束 (ID: {current_training_instance_id})",
@@ -2472,7 +2500,6 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
                 "results": result_dict_from_train
             })
 
-            # 更新训练会话状态为完成
             if websocket_session_id in training_sessions:
                 training_sessions[websocket_session_id].update({
                     "status": "completed",
@@ -2487,7 +2514,6 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
         logger.error(f"{error_msg}\n{traceback.format_exc()}")
         emit_process_error(websocket_session_id,'training', error_msg)
 
-        # 更新训练会话状态为错误
         if websocket_session_id in training_sessions:
             training_sessions[websocket_session_id].update({
                 "status": "error",
@@ -2499,38 +2525,62 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
             conn.rollback()
 
     finally:
-        # 清理资源
+        # **无论训练结果如何 (成功/失败/中止)，都要清理 active_training_processes 中的条目**
+        if websocket_session_id in active_training_processes:
+            del active_training_processes[current_training_instance_id]
+
         if cursor and not cursor.closed:
             cursor.close()
         if conn and not conn.closed:
             conn.close()
         logger.info(f"训练流程结束 (ID: {current_training_instance_id}).")
 
-
-
-# 获取训练状态的REST API
-@app.route('/api/analysis/train/status/<training_instance_id>', methods=['GET'])
+# --- 新增：中止训练接口 ---
+@app.route('/api/analysis/train/train/cancel', methods=['POST'])
 @token_required
-def get_training_status(training_instance_id):
-    """获取训练状态的REST接口"""
-    websocket_session_id = f"training_{training_instance_id}"
+def stop_model_training():
+    data = request.get_json()
+    if not data:
+        return jsonify({"state": 400, "message": "无效的输入数据"}), 400
 
-    if websocket_session_id in training_sessions:
-        session_info = training_sessions[websocket_session_id].copy()
-        # 转换datetime对象为字符串
-        for key, value in session_info.items():
-            if isinstance(value, datetime.datetime):
-                session_info[key] = value.isoformat()
+    training_instance_id = data.get("training_id")
+    if not training_instance_id:
+        return jsonify({"state": 400, "message": "请求的JSON数据中必须包含 'training_id' 字段"}), 400
+
+    process_info = active_training_processes.get(training_instance_id)
+
+    if not process_info:
+        return jsonify({"state": 404, "message": f"未找到 ID 为 '{training_instance_id}' 的活跃训练进程，可能已完成或不存在。"}), 404
+
+    stop_event = process_info["stop_event"]
+    training_thread = process_info["thread"]
+
+    if training_thread and training_thread.is_alive():
+        logger.info(f"收到停止训练请求，训练ID: {training_instance_id}")
+        stop_event.set() # **设置停止事件，向线程发出停止信号**
+        print("Is stop_event set? ", stop_event.is_set())
+
+        if training_instance_id in training_sessions:
+            training_sessions[training_instance_id].update({
+                "status": "stopping",
+                "message": "正在中止训练..."
+            })
 
         return jsonify({
             "state": 200,
-            "data": session_info
+            "data": {
+                "success": "true",
+                "message": f"已向训练实例 '{training_instance_id}' 发出中止信号，训练将在当前操作完成后中止。"
+            }
         }), 200
     else:
+        # 线程可能已经完成或因其他原因停止
+        if training_instance_id in active_training_processes:
+            del active_training_processes[training_instance_id]
         return jsonify({
-            "state": 404,
-            "message": "训练会话不存在"
-        }), 404
+            "state": 409,
+            "message": f"训练实例 '{training_instance_id}' 未在运行或已完成。"
+        }), 409
 
 
 @app.route('/api/analysis/train/train/model/save', methods=['POST'])

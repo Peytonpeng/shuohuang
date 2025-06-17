@@ -201,6 +201,11 @@ def train_generic_dnn_model(train_dataloader, test_dataloader, input_dim, num_cl
             total = 0
 
             for batch_idx, (data, target) in enumerate(train_dataloader):
+                # 检查是否收到停止信号 (在每个batch开始时)
+                if stop_event and stop_event.is_set():
+                    print(f"DNN 训练在第 {round_idx + 1} 轮的第 {epoch + 1} epoch 的第 {batch_idx + 1} 个batch时被用户中止。")
+                    return model, {"error": "Training stopped by user", "message": "训练已中止"}
+
                 data, target = data.to(device), target.to(device)
                 optimizer.zero_grad()
                 output = model(data)
@@ -259,12 +264,22 @@ def train_generic_dnn_model(train_dataloader, test_dataloader, input_dim, num_cl
             }
             emit_round_result(training_id, round_data)
 
+        # 检查是否收到停止信号 (在评估开始前)
+        if stop_event and stop_event.is_set():
+            print(f"DNN 训练在第 {round_idx + 1} 轮的评估阶段被用户中止。")
+            return model, {"error": "Training stopped by user", "message": "训练已中止"}
+
         # 评估当前轮次
         model.eval()
         correct = 0
         total = 0
         with torch.no_grad():
-            for data, target in test_dataloader:
+            for batch_idx, (data, target) in enumerate(test_dataloader):
+                # 检查是否收到停止信号 (在评估的每个batch开始时)
+                if stop_event and stop_event.is_set():
+                    print(f"DNN 训练在第 {round_idx + 1} 轮的评估阶段第 {batch_idx + 1} 个batch时被用户中止。")
+                    return model, {"error": "Training stopped by user", "message": "训练已中止"}
+
                 data, target = data.to(device), target.to(device)
                 output = model(data)
                 pred = output.argmax(dim=1, keepdim=True)
@@ -552,8 +567,6 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
     #聚类：
     kmeans_n_clusters_param = param_data.get("kmeans_n_clusters", num_classes_param if num_classes_param > 0 else 2)
 
-
-
     dnn_hidden_dims = param_data.get("dnn_hidden_dims", [128, 64])
     dnn_dropout_rate = param_data.get("dnn_dropout_rate", 0.5)
 
@@ -609,7 +622,7 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
             model_instance, result_metrics = train_generic_dnn_model(
                 train_dataloader, test_dataloader, input_feature_dimension, num_classes_param,
                 num_rounds_param, epochs_per_round_param, lr_param,
-                dnn_hidden_dims, dnn_dropout_rate, training_id
+                dnn_hidden_dims, dnn_dropout_rate, training_id, stop_event
             )
             if model_instance:
                 try:

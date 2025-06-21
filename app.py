@@ -2199,15 +2199,16 @@ def start_model_training():
 
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
+    # model_train_id字段已删除，改为model_id
     try:
-        cursor.execute("SELECT model_train_id, model_name FROM tb_analysis_model WHERE model_id = %s", (model_id_req,))
+        cursor.execute("SELECT model_id, model_name FROM tb_analysis_model WHERE model_id = %s", (model_id_req,))
         model_meta_result = cursor.fetchone()
         if not model_meta_result:
             cursor.close()
             conn.close()
             return jsonify({"state": 404, "message": f"模型ID '{model_id_req}' 未在 tb_analysis_model 中找到"}), 404
 
-        model_definition_id_from_tb_model = model_meta_result["model_train_id"]
+        model_definition_id_from_tb_model = model_meta_result["model_id"]
         actual_model_name = model_meta_result["model_name"]
 
         from_sample_ids_list = [item["from_sample_id"] for item in sample_data_input_list if "from_sample_id" in item]

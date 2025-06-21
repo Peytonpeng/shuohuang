@@ -163,7 +163,7 @@ class GenericDNN(nn.Module):
 # --- 通用 DNN 模型的训练函数 (集成 SocketIO) ---
 def train_generic_dnn_model(train_dataloader, test_dataloader, input_dim, num_classes,
                             num_rounds=1, epochs_per_round=20, lr=0.001,
-                            hidden_dims=[128, 64], dropout_rate=0.5, training_id=None):
+                            hidden_dims=[128, 64], dropout_rate=0.5, training_id=None,stop_event=None):
     """训练通用DNN模型"""
     start_time = time.time()  # 添加训练开始时间
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -180,17 +180,32 @@ def train_generic_dnn_model(train_dataloader, test_dataloader, input_dim, num_cl
     round_results = []
 
     for round_idx in range(num_rounds):
+        # 检查是否收到停止信号 (在每轮开始时)
+        if stop_event and stop_event.is_set():
+            print(f"DNN 训练在第 {round_idx + 1} 轮时被用户中止。")
+            return model, {"error": "Training stopped by user", "message": "训练已中止"}
+
         print(f"------ 开始训练轮次 {round_idx + 1}/{num_rounds} ------")
         round_losses = []
         round_accuracies = []
 
         for epoch in range(epochs_per_round):
+            # 检查是否收到停止信号 (在每个epoch开始时)
+            if stop_event and stop_event.is_set():
+                print(f"DNN 训练在第 {round_idx + 1} 轮的第 {epoch + 1} epoch 时被用户中止。")
+                return model, {"error": "Training stopped by user", "message": "训练已中止"}
+
             model.train()
             total_loss = 0
             correct = 0
             total = 0
 
             for batch_idx, (data, target) in enumerate(train_dataloader):
+                # 检查是否收到停止信号 (在每个batch开始时)
+                if stop_event and stop_event.is_set():
+                    print(f"DNN 训练在第 {round_idx + 1} 轮的第 {epoch + 1} epoch 的第 {batch_idx + 1} 个batch时被用户中止。")
+                    return model, {"error": "Training stopped by user", "message": "训练已中止"}
+
                 data, target = data.to(device), target.to(device)
                 optimizer.zero_grad()
                 output = model(data)
@@ -249,12 +264,22 @@ def train_generic_dnn_model(train_dataloader, test_dataloader, input_dim, num_cl
             }
             emit_round_result(training_id, round_data)
 
+        # 检查是否收到停止信号 (在评估开始前)
+        if stop_event and stop_event.is_set():
+            print(f"DNN 训练在第 {round_idx + 1} 轮的评估阶段被用户中止。")
+            return model, {"error": "Training stopped by user", "message": "训练已中止"}
+
         # 评估当前轮次
         model.eval()
         correct = 0
         total = 0
         with torch.no_grad():
-            for data, target in test_dataloader:
+            for batch_idx, (data, target) in enumerate(test_dataloader):
+                # 检查是否收到停止信号 (在评估的每个batch开始时)
+                if stop_event and stop_event.is_set():
+                    print(f"DNN 训练在第 {round_idx + 1} 轮的评估阶段第 {batch_idx + 1} 个batch时被用户中止。")
+                    return model, {"error": "Training stopped by user", "message": "训练已中止"}
+
                 data, target = data.to(device), target.to(device)
                 output = model(data)
                 pred = output.argmax(dim=1, keepdim=True)
@@ -318,7 +343,7 @@ def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_
 
     if current_message:
         print(f"错误: {current_message}")
-        emit_process_error(training_id, current_message)
+        emit_process_error(training_id,'training', current_message)
         return {'训练时间': 0, 'message': current_message}
 
     # --- 训练和评估 ---
@@ -331,7 +356,7 @@ def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_
 
             if current_message:
                 print(f"错误: {current_message}")
-                emit_process_error(training_id, current_message)
+                emit_process_error(training_id,'training', current_message)
                 return {'训练时间': 0, 'message': current_message}
 
             emit_process_progress(training_id, 'training', {'status': 'fitting', 'message': f'正在拟合 {model_type}...',
@@ -360,9 +385,8 @@ def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_
                 cluster_centers_list = model.cluster_centers_.tolist()
 
     except Exception as e:
-        current_message = f"模型 {model_type} 训练或评估失败: {str(e)}"
-        print(f"错误: {current_message}\n{traceback.format_exc()}")
-        emit_process_error(training_id, current_message, traceback.format_exc())
+        error_msg = f"模型 {model_type} 训练或评估失败: {str(e)}, {traceback.format_exc()}"
+        emit_process_error(training_id, 'training', error_msg)
 
     train_time = time.time() - start_time
     results = {'训练时间': train_time, 'model_name': model_type}
@@ -384,7 +408,7 @@ def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_
 
 
 # --- 模型训练主函数 (集成 SocketIO) ---
-def train_model(json_data, label_column, model_name, param_data, training_id=None):
+def train_model(json_data, label_column, model_name, param_data, training_id=None,stop_event=None):
     """训练模型的主入口点，处理数据并调用特定模型训练函数"""
     print(f"训练输入数据 (前200字符): {json_data[:200]}...")
     emit_process_progress(training_id, 'training',
@@ -394,12 +418,12 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
         parsed_input_list = json.loads(json_data)
     except json.JSONDecodeError as e:
         error_msg = f"无效的输入JSON数据格式: {e}"
-        emit_process_error(training_id, error_msg)
+        emit_process_error(training_id,'training', error_msg)
         raise ValueError(error_msg)
 
     if not parsed_input_list or not isinstance(parsed_input_list, list):
         error_msg = "解析后的输入数据应为非空列表。"
-        emit_process_error(training_id, error_msg)
+        emit_process_error(training_id,'training', error_msg)
         raise ValueError(error_msg)
 
     all_processed_1d_samples = []
@@ -414,6 +438,12 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
     processed_sample_count = 0
 
     for item_idx, item in enumerate(parsed_input_list):
+        if stop_event and stop_event.is_set():
+            emit_process_completed(training_id, 'training_completed', {
+                'status': 'stopped',
+                'message': f'训练已中止 (预处理进行中，完成 {item_idx}/{total_samples_in_input} 样本)'
+            })
+            return None, {"error": "Training stopped by user", "message": "训练已中止"}
         original_raw_data = item.get("raw_data")
         label = item.get(label_column)
         method = item.get("method")
@@ -438,14 +468,14 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
             data_np = np.array(original_raw_data)
 
             # 根据方法处理数据
-            if method == METHOD_EMD:
+            if method.endswith(METHOD_EMD) :
                 if data_np.ndim == 2 and data_np.shape[1] > 0:
                     processed_1d_data = data_np[:, 0]
                     current_samples_for_item, current_labels_for_item = create_windows_1d(
                         processed_1d_data, label, dnn_window_size, dnn_step, dnn_overlapping_windows)
                 else:
                     print(f"警告 ({METHOD_EMD}): 样本 {item_idx} 形状 {data_np.shape} 不符。")
-            elif method == METHOD_WAVELET:
+            elif method.endswith(METHOD_WAVELET):
                 # 注意: 这里的转置 .T 可能需要根据你的数据实际格式调整
                 if data_np.ndim == 2:
                     data_np = data_np.T
@@ -453,18 +483,29 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
                         data_np, label, dnn_window_size, dnn_step, dnn_overlapping_windows)
                 else:
                     print(f"警告 ({METHOD_WAVELET}): 样本 {item_idx} 形状 {data_np.shape} 不符。")
-            elif method == METHOD_FFT:
+            elif method.endswith(METHOD_FFT):
                 processed_1d_data = data_np.flatten()
                 current_samples_for_item, current_labels_for_item = create_windows_1d(
                     processed_1d_data, label, dnn_window_size, dnn_step, dnn_overlapping_windows)
-            elif method in [METHOD_KURTOSIS, METHOD_HISTOGRAM]:  # 假设这些是预计算好的特征
-                if data_np.ndim == 1: data_np = data_np.reshape(-1,
-                                                                1 if method == METHOD_KURTOSIS else data_np.shape[0])
+                # 针对 '峭度指标' 和 '直方图特征' 的修改
+            elif method.endswith(METHOD_KURTOSIS):  # 单独检查峭度指标
+                # 峭度通常是单个值或少数特征，确保是二维
+                if data_np.ndim == 1:
+                    data_np = data_np.reshape(-1, 1)
                 if data_np.ndim == 2 and data_np.shape[1] > 0:
                     current_samples_for_item = data_np.astype(np.float32)
                     current_labels_for_item = np.full(len(data_np), label, dtype=int)
                 else:
-                    print(f"警告 ({method}): 样本 {item_idx} 形状 {data_np.shape} 不符。")
+                    print(f"警告 ({METHOD_KURTOSIS}): 样本 {item_idx} 形状 {data_np.shape} 不符。")
+            elif method.endswith(METHOD_HISTOGRAM):  # 单独检查直方图特征
+                # 直方图通常是一组特征
+                if data_np.ndim == 1:
+                    data_np = data_np.reshape(-1, data_np.shape[0])
+                if data_np.ndim == 2 and data_np.shape[1] > 0:
+                    current_samples_for_item = data_np.astype(np.float32)
+                    current_labels_for_item = np.full(len(data_np), label, dtype=int)
+                else:
+                    print(f"警告 ({METHOD_HISTOGRAM}): 样本 {item_idx} 形状 {data_np.shape} 不符。")
             else:
                 print(f"警告: 未知方法 '{method}' 用于样本 {item_idx}。")
                 continue
@@ -482,12 +523,13 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
         except Exception as e:
             print(f"处理样本 {item_idx} ({method}) 时出错: {e}")
             traceback.print_exc()
-            emit_process_error(training_id, f"处理样本 {item_idx} 时出错", traceback.format_exc())
+            error_msg = f"处理样本 {item_idx} 时出错: {traceback.format_exc()}"
+            emit_process_error(training_id,'training', error_msg)
             continue
 
     if not all_processed_1d_samples:
         error_msg = "没有样本被成功处理。"
-        emit_process_error(training_id, error_msg)
+        emit_process_error(training_id,'training', error_msg)
         raise ValueError(error_msg)
 
     X_final = np.concatenate(all_processed_1d_samples, axis=0)
@@ -495,7 +537,7 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
 
     if X_final.shape[0] < 2:
         error_msg = f"有效样本数 ({len(X_final)}) 太少，无法训练。"
-        emit_process_error(training_id, error_msg)
+        emit_process_error(training_id,'training', error_msg)
         raise ValueError(error_msg)
 
     if input_feature_dimension is None: input_feature_dimension = X_final.shape[1]
@@ -505,14 +547,28 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
                            'progress_percent': 50})
 
     # --- 模型参数 ---
+    #DNN:
     num_classes_param = param_data.get("num_classes", len(y_final_series.unique()))
+    num_rounds_param = param_data.get("num_rounds", 5)
     lr_param = param_data.get("lr", 0.001)
+    epochs_per_round_param = param_data.get("epochs_per_round", 200)
+    #随机森林：
     n_estimators_param = param_data.get("n_estimators", 100)
-    num_rounds_param = param_data.get("num_rounds", 1)
-    epochs_per_round_param = param_data.get("epochs_per_round", 100)
+    #逻辑回归：
+    lr_max_iter = param_data.get("lr_max_iter", 1000)
+    lr_C = param_data.get("lr_C", 1.0) # Inverse of regularization strength
+    lr_solver = param_data.get("lr_solver", 'lbfgs') # 'lbfgs', 'liblinear', 'newton-cg', 'sag', 'saga'
+    #支持向量机：
+    svc_C = param_data.get("svc_C", 1.0) # Regularization parameter
+    svc_kernel = param_data.get("svc_kernel", 'rbf') # 'linear', 'poly', 'rbf', 'sigmoid', 'precomputed'
+    svc_gamma = param_data.get("svc_gamma", 'scale') # Kernel coefficient ('scale' or 'auto' or float)
+    #线性回归：
+    lr_fit_intercept = param_data.get("lr_fit_intercept", True)  # Whether to calculate the intercept
+    #聚类：
+    kmeans_n_clusters_param = param_data.get("kmeans_n_clusters", num_classes_param if num_classes_param > 0 else 2)
+
     dnn_hidden_dims = param_data.get("dnn_hidden_dims", [128, 64])
     dnn_dropout_rate = param_data.get("dnn_dropout_rate", 0.5)
-    kmeans_n_clusters_param = param_data.get("kmeans_n_clusters", num_classes_param if num_classes_param > 0 else 2)
 
     # --- 划分数据集 ---
     stratify_option = y_final_series if len(y_final_series.unique()) > 1 and all(
@@ -522,17 +578,17 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
 
     # --- 模型配置 ---
     models_config = {
-        '线性回归': LinearRegression(),
-        '逻辑回归': LogisticRegression(max_iter=1000, solver='liblinear', random_state=42),
+        '线性回归': LinearRegression(fit_intercept=lr_fit_intercept),
+        '逻辑回归': LogisticRegression(max_iter=lr_max_iter, C=lr_C, solver=lr_solver, random_state=42),
         '随机森林': RandomForestClassifier(n_estimators=n_estimators_param, random_state=42),
-        '支持向量机': SVC(probability=True, random_state=42),
+        '支持向量机': SVC(probability=True, C=svc_C, kernel=svc_kernel, gamma=svc_gamma, random_state=42),
         'K-均值聚类': KMeans(n_clusters=kmeans_n_clusters_param, n_init='auto', random_state=42),
         '深度神经网络': 'generic_dnn_placeholder'
     }
 
     if model_name not in models_config:
         error_msg = f"不支持的模型名称: {model_name}"
-        emit_process_error(training_id, error_msg)
+        emit_process_error(training_id,'training', error_msg)
         raise ValueError(error_msg)
 
     model_dir = "./saved_models"
@@ -548,7 +604,7 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
     if model_name == '深度神经网络':
         if X_train.shape[0] == 0:
             result_metrics = {'训练时间': 0, '准确率': 0, 'message': '训练数据为空，DNN无法训练。'}
-            emit_process_error(training_id, result_metrics['message'])
+            emit_process_error(training_id,'training', result_metrics['message'])
         else:
             scaler = StandardScaler()
             X_train_scaled = scaler.fit_transform(X_train)
@@ -566,7 +622,7 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
             model_instance, result_metrics = train_generic_dnn_model(
                 train_dataloader, test_dataloader, input_feature_dimension, num_classes_param,
                 num_rounds_param, epochs_per_round_param, lr_param,
-                dnn_hidden_dims, dnn_dropout_rate, training_id
+                dnn_hidden_dims, dnn_dropout_rate, training_id, stop_event
             )
             if model_instance:
                 try:

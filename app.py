@@ -34,11 +34,7 @@ from hello_routes import hello_blueprint
 # 配置日志 (确保在所有 logger 使用之前)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)  # 确保 logger 在这里被定义
-
-# 全局变量定义
-active_training_processes = {}
 training_sessions = {}
-
 app = Flask(__name__)
 Compress(app)
 app.secret_key = 'shuohuangapi'
@@ -2400,7 +2396,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
     if conn is None:
         emit_process_error(websocket_session_id,'training', "数据库连接失败")
         # **如果数据库连接失败，也要清理 active_training_processes 中的条目**
-        if current_training_instance_id in active_training_processes:
+        if websocket_session_id in active_training_processes:
             del active_training_processes[current_training_instance_id]
         return
 
@@ -2453,7 +2449,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
                 "status": "stopped",
                 "end_time": datetime.datetime.now().isoformat()
             })
-            # 更新训练会话状态为"中止"
+            # 更新训练会话状态为“中止”
             if websocket_session_id in training_sessions:
                 training_sessions[websocket_session_id].update({
                     "status": "stopped",
@@ -2531,7 +2527,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
 
     finally:
         # **无论训练结果如何 (成功/失败/中止)，都要清理 active_training_processes 中的条目**
-        if current_training_instance_id in active_training_processes:
+        if websocket_session_id in active_training_processes:
             del active_training_processes[current_training_instance_id]
 
         if cursor and not cursor.closed:
@@ -2562,10 +2558,9 @@ def stop_model_training():
 
     if training_thread and training_thread.is_alive():
         logger.info(f"收到停止训练请求，训练ID: {training_instance_id}")
-        stop_event.set()  # 设置停止事件，向线程发出停止信号
-        logger.info(f"停止事件已设置: {stop_event.is_set()}")
+        stop_event.set() # **设置停止事件，向线程发出停止信号**
+        print("Is stop_event set? ", stop_event.is_set())
 
-        # 更新训练状态
         if training_instance_id in training_sessions:
             training_sessions[training_instance_id].update({
                 "status": "stopping",
@@ -2575,7 +2570,7 @@ def stop_model_training():
         return jsonify({
             "state": 200,
             "data": {
-                "success": True,
+                "success": "true",
                 "message": f"已向训练实例 '{training_instance_id}' 发出中止信号，训练将在当前操作完成后中止。"
             }
         }), 200

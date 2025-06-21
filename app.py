@@ -4,8 +4,8 @@ import torch
 from flask import Flask, request, jsonify, render_template, session
 import threading
 from flask_socketio import SocketIO, emit, join_room, leave_room
-
-import model_function
+from hdfs.config import catch
+from twisted.conch.insults.window import cursor
 # 先导入set_socketio_instance，后面设置完emit函数后再导入train_model
 from model_function import set_socketio_instance
 import pandas as pd
@@ -34,11 +34,7 @@ from hello_routes import hello_blueprint
 # 配置日志 (确保在所有 logger 使用之前)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)  # 确保 logger 在这里被定义
-
-# 全局变量定义
-active_training_processes = {}
 training_sessions = {}
-
 app = Flask(__name__)
 Compress(app)
 app.secret_key = 'shuohuangapi'
@@ -116,12 +112,11 @@ def emit_epoch_result(room_id, data):  # 参数名改为 room_id
         payload = {
             'room_id': room_id,
             'process_type': 'training',
-            'sub_type':'epoch_result',
             'timestamp': datetime.datetime.now().isoformat(),
             **data
         }
         socketio.emit('process_result', payload, namespace='/ns_analysis', room=room_id)
-        logger.info(f"发送epoch结果到房间 {room_id} (ns /ns_analysis): epoch {data.get('global_epoch', '')}")
+        logger.debug(f"发送epoch结果到房间 {room_id} (ns /ns_analysis): epoch {data.get('global_epoch', '')}")
     except Exception as e:
         logger.error(f"发送epoch结果消息失败 (房间 {room_id}): {e}", exc_info=True)
 
@@ -132,7 +127,6 @@ def emit_round_result(room_id, data):  # 参数名改为 room_id
         payload = {
             'room_id': room_id,
             'process_type': 'training',
-            'sub_type': 'round_result',
             'timestamp': datetime.datetime.now().isoformat(),
             **data
         }
@@ -232,8 +226,7 @@ emit_funcs = {
     'training_error': emit_process_error
 }
 set_emit_functions(emit_funcs)
-#定义全局变量：存储活跃训练会话及其关联的线程和停止事件
-active_training_processes = {}
+
 # 在设置完emit函数后导入train_model
 from model_function import train_model
 
@@ -266,7 +259,7 @@ def get_db_connection():
         return None
 
 
-@app.route('/api/analysis/login/token', methods=['POST'])
+@app.route('/api/login/token', methods=['POST'])
 def token():
     # 获得系统token
     SystemToken = request.headers.get('SystemToken')
@@ -903,7 +896,8 @@ def preprocess_confirm():
                     raise json.JSONDecodeError("不是有效的 JSON 列表", original_data_str, 0)
 
                 # 提取原始列名，用于生成 preprocess_sample_id
-                original_column_name = sample["sample_name"]
+                original_column_name = sample["sample_name"].split('_')[-1] if '_' in sample["sample_name"] else sample[
+                    "sample_name"]
 
                 # 保留 before_process_data 结构
                 before_process_data = {
@@ -947,8 +941,7 @@ def preprocess_confirm():
 
                 # 生成 preprocess_sample_id，保留原始列名后缀
                 preprocess_sample_id_base = original_id
-                # 修改数据表命名规则
-                new_preprocess_sample_id = f"{preprocess_sample_id_base}--{original_column_name}"
+                new_preprocess_sample_id = f"{preprocess_sample_id_base}_{original_column_name}"
 
                 # 将实际成功应用的 methods 列表转换为 JSON 字符串，用于数据库存储
                 applied_methods_final_json = json.dumps(applied_methods_list_for_log, ensure_ascii=False)
@@ -1334,7 +1327,7 @@ def feature_confirm():
         processed_count = 0
         total_samples = len(sample_ids)
 
-        for  sample_id in sample_ids:
+        for sample_id in sample_ids:
             processed_count += 1
             if not sample_id:
                 logging.warning("在样本ID列表中发现一个空ID，已跳过。")
@@ -1343,9 +1336,7 @@ def feature_confirm():
 
             original_sample_data_str = None
             sample_type = None
-            determined_legend_text = str(sample_id).split('--')[-1]
-            # 修改feature_extract字段赋值：sample_name+feature_method
-            feature_extract_field_value = f"{determined_legend_text}_{feature_method}" if feature_method else determined_legend_text
+            determined_legend_text = str(sample_id)
 
             cursor.execute(
                 "SELECT original_sample_id, sample_data, sample_name FROM tb_analysis_sample_original WHERE original_sample_id = %s",
@@ -1359,7 +1350,6 @@ def feature_confirm():
                 else:
                     original_sample_data_str = original_sample_row["sample_data"]
                     sample_type = "1"
-                    # 定义
                     determined_legend_text = original_sample_row.get("sample_name")
                     if not determined_legend_text:
                         determined_legend_text = str(sample_id)
@@ -1699,10 +1689,9 @@ def feature_confirm():
                 data_json_db = json.dumps(data_to_store_in_db,
                                           ensure_ascii=False)  # Store potentially multi-dimensional data
 
-                # 执行插入操作
                 cursor.execute(insert_sql, (
                     feature_sample_id, sample_id, sample_type,
-                    feature_extract_field_value, params_json_for_db, '无',
+                    feature_method or '无', params_json_for_db, '无',
                     data_json_db, current_user, datetime.datetime.now(),
                 ))
                 logging.info(f"样本ID {sample_id} 的特征数据已成功准备好插入 (from_sample_id = {sample_id})。")
@@ -1807,7 +1796,7 @@ def feature_confirm():
         if conn: conn.close()
 
 
-@app.route('/api/analysis/train/feature/param/get', methods=['GET'])
+# @app.route('/api/analysis/train/feature/param/get', methods=['GET'])GET
 @token_required
 def get_feature_extraction_params():
     """
@@ -1930,178 +1919,178 @@ def get_feature_extraction_params():
     })
 
 
-@app.route('/api/analysis/train/feature/param/save', methods=['POST'])
-@token_required
-def save_feature_extraction_params():
-    """
-    保存特征提取参数设置到数据库
-
-    Request Body:
-        feature_sample_id: 样本标识，可以为空
-        feature_extract: 特征提取方法名称
-        feature_extract_param: 特征提取参数JSON
-
-    Returns:
-        保存结果的状态
-    """
-    try:
-        data = request.json
-        feature_sample_id = data.get('feature_sample_id', '')
-        feature_extract = data.get('feature_extract', '')
-        feature_extract_param = data.get('feature_extract_param', {})
-
-        # 验证特征提取方法是否存在
-        feature_methods = ["峭度指标", "直方图特征", "傅里叶变换", "小波变换", "经验模态分解", "Wigner-Ville分布"]
-        if feature_extract not in feature_methods:
-            return jsonify({
-                "state": 404,
-                "data": {
-                    "success": False,
-                    "message": f"无效的特征提取方法: {feature_extract}"
-                }
-            })
-
-        # 验证参数合法性
-        valid_params = True
-        error_message = ""
-
-        # 根据不同特征提取方法验证参数
-        if feature_extract == "直方图特征":
-            bins = feature_extract_param.get("bins")
-            if bins is not None and (not isinstance(bins, int) or bins < 2 or bins > 100):
-                valid_params = False
-                error_message = "bins参数必须是2-100之间的整数"
-
-        elif feature_extract == "小波变换":
-            wavelet_name = feature_extract_param.get("wavelet_name")
-            level = feature_extract_param.get("level")
-            valid_wavelets = ["haar", "db1", "db2", "db3", "db4", "db5", "sym2", "sym3", "sym4", "coif1", "coif2",
-                              "bior1.1", "bior1.3", "bior2.2", "bior2.4"]
-
-            if wavelet_name is not None and wavelet_name not in valid_wavelets:
-                valid_params = False
-                error_message = f"无效的小波基名称: {wavelet_name}"
-
-            if level is not None and level is not None and (not isinstance(level, int) or level < 1 or level > 10):
-                valid_params = False
-                error_message = "level参数必须是1-10之间的整数或None"
-
-        elif feature_extract == "经验模态分解":
-            max_imfs = feature_extract_param.get("max_imfs")
-            sift_thresh = feature_extract_param.get("sift_thresh")
-            max_iters = feature_extract_param.get("max_iters")
-
-            if max_imfs is not None and max_imfs is not None and (
-                    not isinstance(max_imfs, int) or max_imfs < 1 or max_imfs > 20):
-                valid_params = False
-                error_message = "max_imfs参数必须是1-20之间的整数或None"
-
-            if sift_thresh is not None and (
-                    not isinstance(sift_thresh, (int, float)) or sift_thresh < 1e-12 or sift_thresh > 1e-4):
-                valid_params = False
-                error_message = "sift_thresh参数必须是1e-12到1e-4之间的浮点数"
-
-            if max_iters is not None and (not isinstance(max_iters, int) or max_iters < 100 or max_iters > 10000):
-                valid_params = False
-                error_message = "max_iters参数必须是100-10000之间的整数"
-
-        if not valid_params:
-            return jsonify({
-                "state": 404,
-                "data": {
-                    "success": False,
-                    "message": f"参数验证失败: {error_message}"
-                }
-            })
-
-        # 获取当前用户（这里使用系统默认值，实际应根据你的认证机制获取）
-        current_user = "system"
-
-        # 将参数保存到数据库
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        try:
-            # 检查feature_sample_id是否存在
-            if feature_sample_id:
-                # 查询该ID是否存在于数据库中
-                cursor.execute("""
-                    SELECT feature_sample_id FROM tb_analysis_sample_feature 
-                    WHERE feature_sample_id = %s
-                """, (feature_sample_id,))
-
-                existing_record = cursor.fetchone()
-
-                if existing_record:
-                    # 更新现有记录
-                    cursor.execute("""
-                        UPDATE tb_analysis_sample_feature
-                        SET feature_extract = %s,
-                            feature_extract_param = %s
-                        WHERE feature_sample_id = %s
-                    """, (
-                        feature_extract,
-                        json.dumps(feature_extract_param),
-                        feature_sample_id
-                    ))
-                else:
-                    # feature_sample_id存在但记录不存在，返回错误
-                    conn.close()
-                    return jsonify({
-                        "state": 404,
-                        "data": {
-                            "success": False,
-                            "message": f"找不到ID为{feature_sample_id}的特征样本记录"
-                        }
-                    })
-            else:
-                # 生成新的feature_sample_id
-                feature_sample_id = str(uuid.uuid4())
-
-                # 创建新记录（部分字段设为空或默认值，因为这只是参数保存阶段）
-                cursor.execute("""
-                    INSERT INTO tb_analysis_sample_feature (
-                        feature_sample_id, feature_extract, feature_extract_param, 
-                        create_user, create_time
-                    ) VALUES (%s, %s, %s, %s, %s)
-                """, (
-                    feature_sample_id,
-                    feature_extract,
-                    json.dumps(feature_extract_param),
-                    current_user,
-                    datetime.datetime.now()
-                ))
-
-            # 提交事务
-            conn.commit()
-
-            return jsonify({
-                "state": 200,
-                "data": {
-                    "success": True,
-                    "message": "参数保存成功",
-                    "feature_sample_id": feature_sample_id,
-                    "feature_extract": feature_extract,
-                    "feature_extract_param": feature_extract_param
-                }
-            })
-
-        except Exception as e:
-            # 回滚事务
-            conn.rollback()
-            raise e
-        finally:
-            # 关闭数据库连接
-            conn.close()
-
-    except Exception as e:
-        return jsonify({
-            "state": 404,
-            "data": {
-                "success": False,
-                "message": f"参数保存失败: {str(e)}"
-            }
-        })
+# @app.route('/api/analysis/train/feature/param/save', methods=['POST'])
+# @token_required
+# def save_feature_extraction_params():
+#     """
+#     保存特征提取参数设置到数据库
+#
+#     Request Body:
+#         feature_sample_id: 样本标识，可以为空
+#         feature_extract: 特征提取方法名称
+#         feature_extract_param: 特征提取参数JSON
+#
+#     Returns:
+#         保存结果的状态
+#     """
+#     try:
+#         data = request.json
+#         feature_sample_id = data.get('feature_sample_id', '')
+#         feature_extract = data.get('feature_extract', '')
+#         feature_extract_param = data.get('feature_extract_param', {})
+#
+#         # 验证特征提取方法是否存在
+#         feature_methods = ["峭度指标", "直方图特征", "傅里叶变换", "小波变换", "经验模态分解", "Wigner-Ville分布"]
+#         if feature_extract not in feature_methods:
+#             return jsonify({
+#                 "state": 404,
+#                 "data": {
+#                     "success": False,
+#                     "message": f"无效的特征提取方法: {feature_extract}"
+#                 }
+#             })
+#
+#         # 验证参数合法性
+#         valid_params = True
+#         error_message = ""
+#
+#         # 根据不同特征提取方法验证参数
+#         if feature_extract == "直方图特征":
+#             bins = feature_extract_param.get("bins")
+#             if bins is not None and (not isinstance(bins, int) or bins < 2 or bins > 100):
+#                 valid_params = False
+#                 error_message = "bins参数必须是2-100之间的整数"
+#
+#         elif feature_extract == "小波变换":
+#             wavelet_name = feature_extract_param.get("wavelet_name")
+#             level = feature_extract_param.get("level")
+#             valid_wavelets = ["haar", "db1", "db2", "db3", "db4", "db5", "sym2", "sym3", "sym4", "coif1", "coif2",
+#                               "bior1.1", "bior1.3", "bior2.2", "bior2.4"]
+#
+#             if wavelet_name is not None and wavelet_name not in valid_wavelets:
+#                 valid_params = False
+#                 error_message = f"无效的小波基名称: {wavelet_name}"
+#
+#             if level is not None and level is not None and (not isinstance(level, int) or level < 1 or level > 10):
+#                 valid_params = False
+#                 error_message = "level参数必须是1-10之间的整数或None"
+#
+#         elif feature_extract == "经验模态分解":
+#             max_imfs = feature_extract_param.get("max_imfs")
+#             sift_thresh = feature_extract_param.get("sift_thresh")
+#             max_iters = feature_extract_param.get("max_iters")
+#
+#             if max_imfs is not None and max_imfs is not None and (
+#                     not isinstance(max_imfs, int) or max_imfs < 1 or max_imfs > 20):
+#                 valid_params = False
+#                 error_message = "max_imfs参数必须是1-20之间的整数或None"
+#
+#             if sift_thresh is not None and (
+#                     not isinstance(sift_thresh, (int, float)) or sift_thresh < 1e-12 or sift_thresh > 1e-4):
+#                 valid_params = False
+#                 error_message = "sift_thresh参数必须是1e-12到1e-4之间的浮点数"
+#
+#             if max_iters is not None and (not isinstance(max_iters, int) or max_iters < 100 or max_iters > 10000):
+#                 valid_params = False
+#                 error_message = "max_iters参数必须是100-10000之间的整数"
+#
+#         if not valid_params:
+#             return jsonify({
+#                 "state": 404,
+#                 "data": {
+#                     "success": False,
+#                     "message": f"参数验证失败: {error_message}"
+#                 }
+#             })
+#
+#         # 获取当前用户（这里使用系统默认值，实际应根据你的认证机制获取）
+#         current_user = "system"
+#
+#         # 将参数保存到数据库
+#         conn = get_db_connection()
+#         cursor = conn.cursor()
+#
+#         try:
+#             # 检查feature_sample_id是否存在
+#             if feature_sample_id:
+#                 # 查询该ID是否存在于数据库中
+#                 cursor.execute("""
+#                     SELECT feature_sample_id FROM tb_analysis_sample_feature
+#                     WHERE feature_sample_id = %s
+#                 """, (feature_sample_id,))
+#
+#                 existing_record = cursor.fetchone()
+#
+#                 if existing_record:
+#                     # 更新现有记录
+#                     cursor.execute("""
+#                         UPDATE tb_analysis_sample_feature
+#                         SET feature_extract = %s,
+#                             feature_extract_param = %s
+#                         WHERE feature_sample_id = %s
+#                     """, (
+#                         feature_extract,
+#                         json.dumps(feature_extract_param),
+#                         feature_sample_id
+#                     ))
+#                 else:
+#                     # feature_sample_id存在但记录不存在，返回错误
+#                     conn.close()
+#                     return jsonify({
+#                         "state": 404,
+#                         "data": {
+#                             "success": False,
+#                             "message": f"找不到ID为{feature_sample_id}的特征样本记录"
+#                         }
+#                     })
+#             else:
+#                 # 生成新的feature_sample_id
+#                 feature_sample_id = str(uuid.uuid4())
+#
+#                 # 创建新记录（部分字段设为空或默认值，因为这只是参数保存阶段）
+#                 cursor.execute("""
+#                     INSERT INTO tb_analysis_sample_feature (
+#                         feature_sample_id, feature_extract, feature_extract_param,
+#                         create_user, create_time
+#                     ) VALUES (%s, %s, %s, %s, %s)
+#                 """, (
+#                     feature_sample_id,
+#                     feature_extract,
+#                     json.dumps(feature_extract_param),
+#                     current_user,
+#                     datetime.datetime.now()
+#                 ))
+#
+#             # 提交事务
+#             conn.commit()
+#
+#             return jsonify({
+#                 "state": 200,
+#                 "data": {
+#                     "success": True,
+#                     "message": "参数保存成功",
+#                     "feature_sample_id": feature_sample_id,
+#                     "feature_extract": feature_extract,
+#                     "feature_extract_param": feature_extract_param
+#                 }
+#             })
+#
+#         except Exception as e:
+#             # 回滚事务
+#             conn.rollback()
+#             raise e
+#         finally:
+#             # 关闭数据库连接
+#             conn.close()
+#
+#     except Exception as e:
+#         return jsonify({
+#             "state": 404,
+#             "data": {
+#                 "success": False,
+#                 "message": f"参数保存失败: {str(e)}"
+#             }
+#         })
 
 
 @app.route('/api/analysis/train/train/sample', methods=['GET'])
@@ -2173,24 +2162,20 @@ def get_model_data():
 # 6.7
 @app.route('/api/analysis/train/train/start', methods=['POST'])
 @token_required
-def start_model_training():
+def start_model_training():  # 函数名已更新
     data = request.get_json()
     if not data:
         return jsonify({"state": 400, "message": "无效的输入数据"}), 400
 
-    room_id = session.get("room_id")
+    # 从前端获取room_id
+    room_id = data.get("room_id",session.get('room'))
     if not room_id:
-        # 如果 room_id 不在 session 中，则回退，或者您可以要求它在请求中
-        room_id = data.get("room_id") # 尝试从请求体中获取
-        if not room_id:
-            return jsonify({"state": 400, "message": "请求的JSON数据中必须包含 'room_id' 字段作为 WebSocket 房间ID"}), 400
-        session['room_id'] = room_id # 将其设置到 session 中以保持一致性
-
+        return jsonify({"state": 400, "message": "请求的JSON数据中必须包含 'room_id' 字段作为 WebSocket 房间ID"}), 400
 
     model_id_req = data.get("model_id", "")
     param_data_req = data.get("param_data", {})
     sample_data_input_list = data.get("sample_data", [])
-    create_user_req = "system"
+    create_user_req = "system"  # Or from authenticated user
     create_time_req = datetime.datetime.now()
 
     conn = get_db_connection()
@@ -2273,7 +2258,6 @@ def start_model_training():
                 param_data_req["num_classes"] = num_unique_labels_generated
 
         final_feature_data_json_for_training = json.dumps(processed_feature_list_for_training)
-        # **使用 UUID 为每次训练生成唯一的实例 ID
         current_training_instance_id = str(uuid.uuid4())
         param_data_req_json = json.dumps(param_data_req)
 
@@ -2308,15 +2292,7 @@ def start_model_training():
         # 生成WebSocket会话ID
         websocket_session_id = room_id
 
-        stop_event = threading.Event()
-        # **存储线程对象和停止事件，以便后续通过 ID 访问**
-        # 初始时线程对象可以为 None，启动后更新
-        active_training_processes[current_training_instance_id] = {
-            "thread": None,
-            "stop_event": stop_event
-        }
-
-        # 存储训练会话信息 (便于前端查询状态)
+        # 存储训练会话信息
         training_sessions[websocket_session_id] = {
             "training_instance_id": current_training_instance_id,
             "model_name": actual_model_name,
@@ -2325,33 +2301,29 @@ def start_model_training():
             "progress": 0
         }
 
-        # 在后台线程中启动训练，并传递停止事件
+        # 在后台线程中启动训练
         training_thread = threading.Thread(
             target=run_training_with_websocket,
             args=(
-                current_training_instance_id,
+                current_training_instance_id,  # 传递 training_instance_id
                 model_id_req,
                 final_feature_data_json_for_training,
                 model_definition_id_from_tb_model,
                 param_data_req,
-                websocket_session_id,
-                stop_event # **传递停止事件**
+                websocket_session_id
             )
         )
         training_thread.daemon = True
         training_thread.start()
-
-        # **将实际的线程对象存储到 active_training_processes 中**
-        active_training_processes[current_training_instance_id]["thread"] = training_thread
 
         return jsonify({
             "state": 200,
             "data": {
                 "success": "true",
                 "message": "训练已启动",
-                "training_id": current_training_instance_id, # **返回这个 ID 给前端**
+                "training_instance_id": websocket_session_id,
                 "websocket": {
-                    "session_id": websocket_session_id, # **这里使用变量，而不是硬编码字符串**
+                    "session_id": "前端room_id",
                     "namespace": "/ns_analysis",
                     "events": {
                         "progress": "training_progress",
@@ -2385,9 +2357,9 @@ def start_model_training():
         if 'conn' in locals() and conn and not conn.closed:
             conn.close()
 
-# --- **修改后的 run_training_with_websocket 函数：接受 stop_event 并进行清理** ---
+
 def run_training_with_websocket(current_training_instance_id, model_id_from_request, sample_data_json_with_labels,
-                                base_model_train_id_for_process, full_param_data, websocket_session_id, stop_event):
+                                base_model_train_id_for_process, full_param_data, websocket_session_id):
     """
     带WebSocket通信的训练执行函数
     """
@@ -2397,10 +2369,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
     model_definition_id = base_model_train_id_for_process
     conn = get_db_connection()
     if conn is None:
-        emit_process_error(websocket_session_id,'training', "数据库连接失败")
-        # **如果数据库连接失败，也要清理 active_training_processes 中的条目**
-        if current_training_instance_id in active_training_processes:
-            del active_training_processes[current_training_instance_id]
+        emit_process_error(websocket_session_id, "数据库连接失败")
         return
 
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -2408,19 +2377,26 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
     actual_model_name_for_training = "Unknown"
 
     try:
+        # 获取模型名称
         cursor.execute("SELECT model_name FROM tb_analysis_model WHERE model_id = %s", (model_id_from_request,))
         model_info_result = cursor.fetchone()
         if model_info_result is None:
-            emit_process_error(websocket_session_id,'training', f"模型ID {model_id_from_request} 未找到")
+            emit_process_error(websocket_session_id, f"模型ID {model_id_from_request} 未找到")
             return
         actual_model_name_for_training = model_info_result["model_name"]
 
+        # 更新训练会话状态
         if websocket_session_id in training_sessions:
             training_sessions[websocket_session_id].update({
                 "status": "training",
                 "model_name": actual_model_name_for_training
             })
 
+        # 设置 model_function 模块的 socketio 实例和 emit 函数
+        set_socketio_instance(socketio)
+
+
+        # 发送训练开始消息
         emit_process_progress(websocket_session_id, 'training',{
             "status": "started",
             "message": f"开始 {actual_model_name_for_training} 模型训练",
@@ -2430,40 +2406,24 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
         logger.info(
             f"开始 {actual_model_name_for_training} 模型训练 (训练实例ID: {current_training_instance_id}, 定义 ID: {model_definition_id})")
 
-        # **调用 train_model 函数，传递 stop_event**
-        trained_model_instance, result_dict_from_train = model_function.train_model(
+        # --- 调用 train_model 函数，修正参数名 ---
+        trained_model_instance, result_dict_from_train = train_model(
             json_data=sample_data_json_with_labels,
             label_column="label",
             model_name=actual_model_name_for_training,
             param_data=full_param_data,
-            training_id=websocket_session_id,
-            stop_event=stop_event # **传递 stop_event**
+            training_id=websocket_session_id  # 修正：使用正确的参数名
         )
 
-        # 检查训练结果，首先判断是否是用户中止
-        is_stopped_by_user = stop_event.is_set()
+        # 检查训练结果
         is_error = 'error' in result_dict_from_train or '失败' in result_dict_from_train.get('message', '').lower()
 
-        if is_stopped_by_user:
-            message = "训练已中止"
-            logger.info(f"训练 {current_training_instance_id} 已由用户中止。")
-            emit_process_completed(websocket_session_id, 'training', {
-                "message": message,
-                "status": "stopped",
-                "end_time": datetime.datetime.now().isoformat()
-            })
-            # 更新训练会话状态为"中止"
-            if websocket_session_id in training_sessions:
-                training_sessions[websocket_session_id].update({
-                    "status": "stopped",
-                    "end_time": datetime.datetime.now().isoformat(),
-                    "progress": training_sessions[websocket_session_id].get("progress", 0) # 保留最后进度
-                })
-        elif is_error:
+        if is_error:
             error_msg = result_dict_from_train.get('message', '训练期间发生未知错误')
             logger.error(f"训练失败: {error_msg}")
-            emit_process_error(websocket_session_id,'training', error_msg)
+            emit_process_error(websocket_session_id, error_msg)
 
+            # 更新训练会话状态为错误
             if websocket_session_id in training_sessions:
                 training_sessions[websocket_session_id].update({
                     "status": "error",
@@ -2472,6 +2432,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
                 })
             conn.rollback()
         else:
+            # 训练成功，保存结果到数据库
             process_record_id_val = current_training_instance_id
             happen_time_process = datetime.datetime.now()
             try:
@@ -2480,6 +2441,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
                 logger.error(f"错误: 训练结果无法序列化: {e}", exc_info=True)
                 process_data_json_to_db = json.dumps({"error": f"结果序列化失败: {e}"})
 
+            # 插入或更新训练结果
             query_insert_train_process = """
             INSERT INTO tb_analysis_model_train_process
             (model_train_id, happen_time, process_data, create_user, create_time)
@@ -2497,6 +2459,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
             conn.commit()
             logger.info(f"最终训练结果已保存 (ID: {process_record_id_val})。")
 
+            # 发送训练完成消息
             end_time = datetime.datetime.now()
             emit_process_completed(websocket_session_id,'training', {
                 "message": f"模型训练过程结束 (ID: {current_training_instance_id})",
@@ -2504,6 +2467,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
                 "results": result_dict_from_train
             })
 
+            # 更新训练会话状态为完成
             if websocket_session_id in training_sessions:
                 training_sessions[websocket_session_id].update({
                     "status": "completed",
@@ -2516,8 +2480,9 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
         import traceback
         error_msg = f"run_training_with_websocket 发生意外错误: {e}"
         logger.error(f"{error_msg}\n{traceback.format_exc()}")
-        emit_process_error(websocket_session_id,'training', error_msg)
+        emit_process_error(websocket_session_id, error_msg)
 
+        # 更新训练会话状态为错误
         if websocket_session_id in training_sessions:
             training_sessions[websocket_session_id].update({
                 "status": "error",
@@ -2529,63 +2494,38 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
             conn.rollback()
 
     finally:
-        # **无论训练结果如何 (成功/失败/中止)，都要清理 active_training_processes 中的条目**
-        if current_training_instance_id in active_training_processes:
-            del active_training_processes[current_training_instance_id]
-
+        # 清理资源
         if cursor and not cursor.closed:
             cursor.close()
         if conn and not conn.closed:
             conn.close()
         logger.info(f"训练流程结束 (ID: {current_training_instance_id}).")
 
-# --- 新增：中止训练接口 ---
-@app.route('/api/analysis/train/train/cancel', methods=['POST'])
+
+
+# 获取训练状态的REST API
+@app.route('/api/analysis/train/status/<training_instance_id>', methods=['GET'])
 @token_required
-def stop_model_training():
-    data = request.get_json()
-    if not data:
-        return jsonify({"state": 400, "message": "无效的输入数据"}), 400
+def get_training_status(training_instance_id):
+    """获取训练状态的REST接口"""
+    websocket_session_id = f"training_{training_instance_id}"
 
-    training_instance_id = data.get("training_id")
-    if not training_instance_id:
-        return jsonify({"state": 400, "message": "请求的JSON数据中必须包含 'training_id' 字段"}), 400
-
-    process_info = active_training_processes.get(training_instance_id)
-
-    if not process_info:
-        return jsonify({"state": 404, "message": f"未找到 ID 为 '{training_instance_id}' 的活跃训练进程，可能已完成或不存在。"}), 404
-
-    stop_event = process_info["stop_event"]
-    training_thread = process_info["thread"]
-
-    if training_thread and training_thread.is_alive():
-        logger.info(f"收到停止训练请求，训练ID: {training_instance_id}")
-        stop_event.set()  # 设置停止事件，向线程发出停止信号
-        logger.info(f"停止事件已设置: {stop_event.is_set()}")
-
-        # 更新训练状态
-        if training_instance_id in training_sessions:
-            training_sessions[training_instance_id].update({
-                "status": "stopping",
-                "message": "正在中止训练..."
-            })
+    if websocket_session_id in training_sessions:
+        session_info = training_sessions[websocket_session_id].copy()
+        # 转换datetime对象为字符串
+        for key, value in session_info.items():
+            if isinstance(value, datetime.datetime):
+                session_info[key] = value.isoformat()
 
         return jsonify({
             "state": 200,
-            "data": {
-                "success": True,
-                "message": f"已向训练实例 '{training_instance_id}' 发出中止信号，训练将在当前操作完成后中止。"
-            }
+            "data": session_info
         }), 200
     else:
-        # 线程可能已经完成或因其他原因停止
-        if training_instance_id in active_training_processes:
-            del active_training_processes[training_instance_id]
         return jsonify({
-            "state": 409,
-            "message": f"训练实例 '{training_instance_id}' 未在运行或已完成。"
-        }), 409
+            "state": 404,
+            "message": "训练会话不存在"
+        }), 404
 
 
 @app.route('/api/analysis/train/train/model/save', methods=['POST'])
@@ -3347,9 +3287,160 @@ def add_apply_sample_to_library():
             conn.close()
 
 
+#6.19日记录 开发两个接口 用于查询参数和保存参数
+"""
+    获取模型的参数
+"""
+@app.route('/api/analysis/train/feature/param/get', methods=['GET'])
+@token_required
+def getTrainModelParam():
+    #1.拿到model id  查数据库  校验
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return jsonify({"state": 500, "message": "数据库连接失败"}), 500
+
+        train_model_id = request.args.get('model_train_id')
+        if not train_model_id:
+            return jsonify({"state": 500, "message": "传参为空"})
+
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cursor.execute(
+            "SELECT param_config FROM tb_analysis_model WHERE model_id = %s",
+            (train_model_id,)
+        )
+        param = cursor.fetchall()
+        #要校验不为空不
+        return jsonify({"state": 200, "data": param}), 200
+    except Exception as e:
+        # 捕获任何服务器内部错误
+        print(f"获取模型数据失败: {str(e)}")  # 打印错误以便调试
+        return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@app.route('/api/analysis/train/feature/param/save', methods=['POST'])
+@token_required
+def save_train_model_param():
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json()
+
+        model_id = data.get('model_id')
+        param = data.get('param')
+
+        # 参数校验
+        if not model_id or not param:
+            return jsonify({"state": 400, "message": "缺少必要参数: model_id 或 param"}), 400
+
+        # JSON 解析
+        try:
+            # 如果 param 已经是列表或字典，直接使用；如果是字符串，则解析
+            param_data = json.loads(param) if isinstance(param, str) else param
+        except json.JSONDecodeError as e:
+            return jsonify({"state": 400, "message": f"JSON 解析失败: {str(e)}"}), 400
+
+        # 参数格式校验
+        is_valid, errors = validate_param_values(param_data)
+        if not is_valid:
+            return jsonify({
+                "state": 400,
+                "message": "参数校验失败",
+                "errors": errors
+            }), 400
+
+        # 将Python对象转换为JSON字符串，用于数据库存储和返回
+        param_string = json.dumps(param_data, ensure_ascii=False)
+
+        # 数据库操作
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        # 检查 model_id 是否存在
+        cursor.execute("SELECT COUNT(*) FROM tb_analysis_model WHERE model_id = %s", (model_id,))
+        exists = cursor.fetchone()[0]
+
+        if exists:
+            # 存在，执行更新
+            cursor.execute(
+                "UPDATE tb_analysis_model SET param_config = %s WHERE model_id = %s",
+                (param_string, model_id)
+            )
+            conn.commit()
+        else:
+            # 不存在，提示或处理
+            return jsonify({
+                "state": 403,
+                "data": {
+                    "success": "false",
+                    "message": "参数上传失败，上传的model_id不存在"
+                }
+            })
+
+        return jsonify({
+            "state": 200,
+            "data": {
+                "success": "true",
+                "message": "参数上传成功"
+            }
+        })
+
+    except Exception as e:
+        print(f"保存模型参数失败: {str(e)}")
+        # 避免将底层错误信息直接暴露给客户端
+        return jsonify({"state": 500, "message": "服务器内部错误"}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+def validate_param_values(data):
+    """
+    校验参数结构是否为 [{...}, {...}]
+    并检查每个字典是否包含所需键，并限制 param_values 长度不超过 4。
+    """
+    error_messages = []
+
+    if not isinstance(data, list):
+        return False, ["参数格式错误：最外层必须是一个列表"]
+
+    for param_obj in data:
+        if not isinstance(param_obj, dict):
+            error_messages.append(f"参数格式错误：参数项必须是字典，实际为 {type(param_obj).__name__}")
+            continue
+
+        required_keys = ["param_name", "default_value", "param_values"]
+        missing_keys = [key for key in required_keys if key not in param_obj]
+        if missing_keys:
+            error_messages.append(f"参数对象 {param_obj} 缺少键: {', '.join(missing_keys)}")
+            continue  # 如果缺键就不再继续校验这个 param_obj
+
+        param_values = param_obj.get('param_values')
+        if not isinstance(param_values, list):
+            error_messages.append(f"参数 '{param_obj.get('param_name')}' 的 'param_values' 必须是一个列表")
+        elif len(param_values) > 4:
+            error_messages.append(f"参数 '{param_obj.get('param_name')}' 的 'param_values' 长度不能超过 4，当前为 {len(param_values)}")
+
+    if error_messages:
+        return False, error_messages
+
+    return True, []
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
 
 
 if __name__ == '__main__':

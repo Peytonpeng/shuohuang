@@ -3291,7 +3291,7 @@ def add_apply_sample_to_library():
 """
     获取模型的参数
 """
-@app.route('/api/analysis/train/feature/param/get', methods=['GET'])
+@app.route('/api/analysis/train/param/get', methods=['GET'])
 @token_required
 def getTrainModelParam():
     #1.拿到model id  查数据库  校验
@@ -3325,7 +3325,7 @@ def getTrainModelParam():
             conn.close()
 
 
-@app.route('/api/analysis/train/feature/param/save', methods=['POST'])
+@app.route('/api/analysis/train/param/save', methods=['POST'])
 @token_required
 def save_train_model_param():
     conn = None

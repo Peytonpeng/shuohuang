@@ -2718,79 +2718,145 @@ def download_model():
 
 @app.route('/api/analysis/train/train/param/get', methods=['GET'])
 @token_required
-def get_param():
-    model_id = request.args.get("model_id", "")
-    if not model_id:
-        return jsonify({"state": 400, "message": "Invalid model_id"}), 400
-
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"state": 500, "message": "Database connection failed"}), 500
-
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+def getTrainModelParam():
+    #1.拿到model id  查数据库  校验
+    conn = None
+    cursor = None
     try:
-        cursor.execute("SELECT param_data FROM tb_analysis_model_train WHERE model_id = %s", (model_id,))
-        result = cursor.fetchone()
-        if not result:
-            return jsonify({"state": 404, "message": "Model record not found"}), 404
+        conn = get_db_connection()
+        if conn is None:
+            return jsonify({"state": 500, "message": "数据库连接失败"}), 500
 
-        param_data = result.get('param_data', "")
-        return jsonify({
-            "state": 200,
-            "data": {
-                "param_data": param_data
-            }
-        }), 200
-    except psycopg2.Error as e:
-        print(f"Error getting param data: {e}")
-        return jsonify({"state": 500, "message": "Failed to get param data"}), 500
+        train_model_id = request.args.get('model_train_id')
+        if not train_model_id:
+            return jsonify({"state": 500, "message": "传参为空"})
+
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cursor.execute(
+            "SELECT param_config FROM tb_analysis_model WHERE model_id = %s",
+            (train_model_id,)
+        )
+        param = cursor.fetchall()
+        #要校验不为空不
+        return jsonify({"state": 200, "data": param}), 200
+    except Exception as e:
+        # 捕获任何服务器内部错误
+        print(f"获取模型数据失败: {str(e)}")  # 打印错误以便调试
+        return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
     finally:
-        cursor.close()
-        conn.close()
-
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 @app.route('/api/analysis/train/train/param/save', methods=['POST'])
 @token_required
-def save_param():
+def save_train_model_param():
+    conn = None
+    cursor = None
     try:
         data = request.get_json()
-        model_train_id = data.get('model_train_id', "")
-        model_id = data.get('model_id', "")
-        param_data = data.get('param_data', {})
-        # 将字典转换为JSON字符串
-        param_data_str = json.dumps(param_data)
 
-        if not model_train_id or not model_id:
-            return jsonify({"state": 400, "message": "Invalid model_train_id or model_id"}), 400
+        model_id = data.get('model_id')
+        param = data.get('params')
 
-        conn = get_db_connection()
-        if conn is None:
-            return jsonify({"state": 500, "message": "Database connection failed"}), 500
+        # 参数校验
+        if not model_id or not param:
+            return jsonify({"state": 400, "message": "缺少必要参数: model_id 或 param"}), 400
 
-        cursor = conn.cursor()
+        # JSON 解析
         try:
-            query = "UPDATE tb_analysis_model_train SET param_data = %s WHERE model_train_id = %s AND model_id = %s"
-            cursor.execute(query, (param_data_str, model_train_id, model_id))
-            conn.commit()
-            if cursor.rowcount == 0:
-                return jsonify({"state": 404, "message": "Record not found for update"}), 404
+            # 如果 param 已经是列表或字典，直接使用；如果是字符串，则解析
+            param_data = json.loads(param) if isinstance(param, str) else param
+        except json.JSONDecodeError as e:
+            return jsonify({"state": 400, "message": f"JSON 解析失败: {str(e)}"}), 400
+
+        # 参数格式校验
+        is_valid, errors = validate_param_values(param_data)
+        if not is_valid:
             return jsonify({
-                "state": 200,
+                "state": 400,
+                "message": "参数校验失败",
+                "errors": errors
+            }), 400
+
+        # 将Python对象转换为JSON字符串，用于数据库存储和返回
+        param_string = json.dumps(param_data, ensure_ascii=False)
+
+        # 数据库操作
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        # 检查 model_id 是否存在
+        cursor.execute("SELECT COUNT(*) FROM tb_analysis_model WHERE model_id = %s", (model_id,))
+        exists = cursor.fetchone()[0]
+
+        if exists:
+            # 存在，执行更新
+            cursor.execute(
+                "UPDATE tb_analysis_model SET param_config = %s WHERE model_id = %s",
+                (param_string, model_id)
+            )
+            conn.commit()
+        else:
+            # 不存在，提示或处理
+            return jsonify({
+                "state": 403,
                 "data": {
-                    "success": "true",
-                    "message": "Data updated successfully"
+                    "success": "false",
+                    "message": "参数上传失败，上传的model_id不存在"
                 }
-            }), 200
-        except psycopg2.Error as e:
-            print(f"Error updating param data: {e}")
-            conn.rollback()
-            return jsonify({"state": 500, "message": "Failed to update param data"}), 500
-        finally:
-            cursor.close()
-            conn.close()
+            })
+
+        return jsonify({
+            "state": 200,
+            "data": {
+                "success": "true",
+                "message": "参数上传成功"
+            }
+        })
+
     except Exception as e:
-        print(f"Error processing request: {e}")
-        return jsonify({"state": 400, "message": "Invalid request format"}), 400
+        print(f"保存模型参数失败: {str(e)}")
+        # 避免将底层错误信息直接暴露给客户端
+        return jsonify({"state": 500, "message": "服务器内部错误"}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+def validate_param_values(data):
+    """
+    校验参数结构是否为 [{...}, {...}]
+    并检查每个字典是否包含所需键，并限制 param_values 长度不超过 4。
+    """
+    error_messages = []
+
+    if not isinstance(data, list):
+        return False, ["参数格式错误：最外层必须是一个列表"]
+
+    for param_obj in data:
+        if not isinstance(param_obj, dict):
+            error_messages.append(f"参数格式错误：参数项必须是字典，实际为 {type(param_obj).__name__}")
+            continue
+
+        required_keys = ["param_name", "default_value", "param_values"]
+        missing_keys = [key for key in required_keys if key not in param_obj]
+        if missing_keys:
+            error_messages.append(f"参数对象 {param_obj} 缺少键: {', '.join(missing_keys)}")
+            continue  # 如果缺键就不再继续校验这个 param_obj
+
+        param_values = param_obj.get('param_values')
+        if not isinstance(param_values, list):
+            error_messages.append(f"参数 '{param_obj.get('param_name')}' 的 'param_values' 必须是一个列表")
+        elif len(param_values) > 4:
+            error_messages.append(f"参数 '{param_obj.get('param_name')}' 的 'param_values' 长度不能超过 4，当前为 {len(param_values)}")
+
+    if error_messages:
+        return False, error_messages
+
+    return True, []
 
 
 # 5.12新增AI模型应用接口：
@@ -3354,147 +3420,7 @@ def add_apply_sample_to_library():
         if conn:
             conn.close()
 
-@app.route('/api/analysis/train/param/get', methods=['GET'])
-@token_required
-def getTrainModelParam():
-    #1.拿到model id  查数据库  校验
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            return jsonify({"state": 500, "message": "数据库连接失败"}), 500
 
-        train_model_id = request.args.get('model_train_id')
-        if not train_model_id:
-            return jsonify({"state": 500, "message": "传参为空"})
-
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cursor.execute(
-            "SELECT param_config FROM tb_analysis_model WHERE model_id = %s",
-            (train_model_id,)
-        )
-        param = cursor.fetchall()
-        #要校验不为空不
-        return jsonify({"state": 200, "data": param}), 200
-    except Exception as e:
-        # 捕获任何服务器内部错误
-        print(f"获取模型数据失败: {str(e)}")  # 打印错误以便调试
-        return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
-
-@app.route('/api/analysis/train/param/save', methods=['POST'])
-@token_required
-def save_train_model_param():
-    conn = None
-    cursor = None
-    try:
-        data = request.get_json()
-
-        model_id = data.get('model_id')
-        param = data.get('param')
-
-        # 参数校验
-        if not model_id or not param:
-            return jsonify({"state": 400, "message": "缺少必要参数: model_id 或 param"}), 400
-
-        # JSON 解析
-        try:
-            # 如果 param 已经是列表或字典，直接使用；如果是字符串，则解析
-            param_data = json.loads(param) if isinstance(param, str) else param
-        except json.JSONDecodeError as e:
-            return jsonify({"state": 400, "message": f"JSON 解析失败: {str(e)}"}), 400
-
-        # 参数格式校验
-        is_valid, errors = validate_param_values(param_data)
-        if not is_valid:
-            return jsonify({
-                "state": 400,
-                "message": "参数校验失败",
-                "errors": errors
-            }), 400
-
-        # 将Python对象转换为JSON字符串，用于数据库存储和返回
-        param_string = json.dumps(param_data, ensure_ascii=False)
-
-        # 数据库操作
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        # 检查 model_id 是否存在
-        cursor.execute("SELECT COUNT(*) FROM tb_analysis_model WHERE model_id = %s", (model_id,))
-        exists = cursor.fetchone()[0]
-
-        if exists:
-            # 存在，执行更新
-            cursor.execute(
-                "UPDATE tb_analysis_model SET param_config = %s WHERE model_id = %s",
-                (param_string, model_id)
-            )
-            conn.commit()
-        else:
-            # 不存在，提示或处理
-            return jsonify({
-                "state": 403,
-                "data": {
-                    "success": "false",
-                    "message": "参数上传失败，上传的model_id不存在"
-                }
-            })
-
-        return jsonify({
-            "state": 200,
-            "data": {
-                "success": "true",
-                "message": "参数上传成功"
-            }
-        })
-
-    except Exception as e:
-        print(f"保存模型参数失败: {str(e)}")
-        # 避免将底层错误信息直接暴露给客户端
-        return jsonify({"state": 500, "message": "服务器内部错误"}), 500
-
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
-
-def validate_param_values(data):
-    """
-    校验参数结构是否为 [{...}, {...}]
-    并检查每个字典是否包含所需键，并限制 param_values 长度不超过 4。
-    """
-    error_messages = []
-
-    if not isinstance(data, list):
-        return False, ["参数格式错误：最外层必须是一个列表"]
-
-    for param_obj in data:
-        if not isinstance(param_obj, dict):
-            error_messages.append(f"参数格式错误：参数项必须是字典，实际为 {type(param_obj).__name__}")
-            continue
-
-        required_keys = ["param_name", "default_value", "param_values"]
-        missing_keys = [key for key in required_keys if key not in param_obj]
-        if missing_keys:
-            error_messages.append(f"参数对象 {param_obj} 缺少键: {', '.join(missing_keys)}")
-            continue  # 如果缺键就不再继续校验这个 param_obj
-
-        param_values = param_obj.get('param_values')
-        if not isinstance(param_values, list):
-            error_messages.append(f"参数 '{param_obj.get('param_name')}' 的 'param_values' 必须是一个列表")
-        elif len(param_values) > 4:
-            error_messages.append(f"参数 '{param_obj.get('param_name')}' 的 'param_values' 长度不能超过 4，当前为 {len(param_values)}")
-
-    if error_messages:
-        return False, error_messages
-
-    return True, []
 @app.route('/')
 def index():
     return render_template('index.html')

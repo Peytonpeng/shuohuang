@@ -163,7 +163,7 @@ class GenericDNN(nn.Module):
 # --- 通用 DNN 模型的训练函数 (集成 SocketIO) ---
 def train_generic_dnn_model(train_dataloader, test_dataloader, input_dim, num_classes,
                             num_rounds=1, epochs_per_round=20, lr=0.001,
-                            hidden_dims=[128, 64], dropout_rate=0.5, training_id=None,stop_event=None):
+                            hidden_dims=[128, 64], dropout_rate=0.5, training_id=None, stop_event=None):
     """训练通用DNN模型"""
     start_time = time.time()  # 添加训练开始时间
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -303,7 +303,7 @@ def train_generic_dnn_model(train_dataloader, test_dataloader, input_dim, num_cl
 
 # --- 模型评估函数 (用于非 DNN 模型，添加 SocketIO 支持) ---
 def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_series,
-                           model_type, num_classes=None, training_id=None):
+                           model_type, num_classes=None, training_id=None, stop_event=None):
     """评估 Scikit-learn 模型，并通过 WebSocket 发送更新"""
     start_time = time.time()
     mse, recall, f1, accuracy = None, None, None, None
@@ -343,6 +343,11 @@ def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_
                 print(f"错误: {current_message}")
                 emit_process_error(training_id,'training', current_message)
                 return {'训练时间': 0, 'message': current_message}
+
+            # 在拟合前检查停止信号
+            if stop_event and stop_event.is_set():
+                print(f"模型 {model_type} 训练在开始拟合前被中止。")
+                return {'训练时间': 0, 'message': '训练已中止'}
 
             emit_process_progress(training_id, 'training', {'status': 'fitting', 'message': f'正在拟合 {model_type}...',
                                                             'progress_percent': 30})
@@ -393,7 +398,7 @@ def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_
 
 
 # --- 模型训练主函数 (集成 SocketIO) ---
-def train_model(json_data, label_column, model_name, param_data, training_id=None,stop_event=None):
+def train_model(json_data, label_column, model_name, param_data, training_id=None, stop_event=None):
     """训练模型的主入口点，处理数据并调用特定模型训练函数"""
     print(f"训练输入数据 (前200字符): {json_data[:200]}...")
     emit_process_progress(training_id, 'training',
@@ -423,23 +428,24 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
     processed_sample_count = 0
 
     for item_idx, item in enumerate(parsed_input_list):
+        # 在每个样本处理前检查停止信号
         if stop_event and stop_event.is_set():
-            emit_process_completed(training_id, 'training_completed', {
-                'status': 'stopped',
-                'message': f'训练已中止 (预处理进行中，完成 {item_idx}/{total_samples_in_input} 样本)'
+            print(f"数据预处理在处理第 {item_idx + 1} 个样本时被中止。")
+            # 返回一个表示中止的特定字典
+            return None, {"error": "Training stopped by user", "message": "训练在预处理阶段已中止"}
+
+        # 发送进度更新
+        progress_percent = 10 + (item_idx / total_samples_in_input) * 40  # 假设预处理占10%-50%
+        emit_process_progress(
+            training_id, 'training', {
+                'status': 'preprocessing_progress',
+                'message': f'正在处理输入样本 {item_idx + 1}/{total_samples_in_input}',
+                'progress_percent': progress_percent
             })
-            return None, {"error": "Training stopped by user", "message": "训练已中止"}
+
         original_raw_data = item.get("raw_data")
         label = item.get(label_column)
         method = item.get("method")
-
-        # 定期发送处理进度
-        if item_idx % max(1, total_samples_in_input // 10) == 0:
-            emit_process_progress(training_id, 'training', {
-                'status': 'preprocessing_progress',
-                'message': f'正在处理输入样本 {item_idx + 1}/{total_samples_in_input}',
-                'progress_percent': ((item_idx + 1) / total_samples_in_input) * 50  # 预处理占50%
-            })
 
         if original_raw_data is None or label is None or method is None:
             print(f"警告: 跳过样本 {item_idx}，缺少关键信息。")
@@ -609,7 +615,7 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
             model_instance, result_metrics = train_generic_dnn_model(
                 train_dataloader, test_dataloader, input_feature_dimension, num_classes_param,
                 num_rounds_param, epochs_per_round_param, lr_param,
-                dnn_hidden_dims, dnn_dropout_rate, training_id
+                dnn_hidden_dims, dnn_dropout_rate, training_id, stop_event
             )
             if model_instance:
                 try:
@@ -622,7 +628,7 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
         model_instance = models_config[model_name]
         result_metrics = evaluate_sklearn_model(
             model_instance, X_train, X_test, y_train, y_test,
-            model_name, num_classes_param, training_id
+            model_name, num_classes_param, training_id, stop_event
         )
         if model_instance and '失败' not in result_metrics.get('message', ''):
             try:

@@ -1796,7 +1796,7 @@ def feature_confirm():
         if conn: conn.close()
 
 
-# @app.route('/api/analysis/train/feature/param/get', methods=['GET'])GET
+@app.route('/api/analysis/train/feature/param/get', methods=['GET'])
 @token_required
 def get_feature_extraction_params():
     """
@@ -1919,178 +1919,178 @@ def get_feature_extraction_params():
     })
 
 
-# @app.route('/api/analysis/train/feature/param/save', methods=['POST'])
-# @token_required
-# def save_feature_extraction_params():
-#     """
-#     保存特征提取参数设置到数据库
-#
-#     Request Body:
-#         feature_sample_id: 样本标识，可以为空
-#         feature_extract: 特征提取方法名称
-#         feature_extract_param: 特征提取参数JSON
-#
-#     Returns:
-#         保存结果的状态
-#     """
-#     try:
-#         data = request.json
-#         feature_sample_id = data.get('feature_sample_id', '')
-#         feature_extract = data.get('feature_extract', '')
-#         feature_extract_param = data.get('feature_extract_param', {})
-#
-#         # 验证特征提取方法是否存在
-#         feature_methods = ["峭度指标", "直方图特征", "傅里叶变换", "小波变换", "经验模态分解", "Wigner-Ville分布"]
-#         if feature_extract not in feature_methods:
-#             return jsonify({
-#                 "state": 404,
-#                 "data": {
-#                     "success": False,
-#                     "message": f"无效的特征提取方法: {feature_extract}"
-#                 }
-#             })
-#
-#         # 验证参数合法性
-#         valid_params = True
-#         error_message = ""
-#
-#         # 根据不同特征提取方法验证参数
-#         if feature_extract == "直方图特征":
-#             bins = feature_extract_param.get("bins")
-#             if bins is not None and (not isinstance(bins, int) or bins < 2 or bins > 100):
-#                 valid_params = False
-#                 error_message = "bins参数必须是2-100之间的整数"
-#
-#         elif feature_extract == "小波变换":
-#             wavelet_name = feature_extract_param.get("wavelet_name")
-#             level = feature_extract_param.get("level")
-#             valid_wavelets = ["haar", "db1", "db2", "db3", "db4", "db5", "sym2", "sym3", "sym4", "coif1", "coif2",
-#                               "bior1.1", "bior1.3", "bior2.2", "bior2.4"]
-#
-#             if wavelet_name is not None and wavelet_name not in valid_wavelets:
-#                 valid_params = False
-#                 error_message = f"无效的小波基名称: {wavelet_name}"
-#
-#             if level is not None and level is not None and (not isinstance(level, int) or level < 1 or level > 10):
-#                 valid_params = False
-#                 error_message = "level参数必须是1-10之间的整数或None"
-#
-#         elif feature_extract == "经验模态分解":
-#             max_imfs = feature_extract_param.get("max_imfs")
-#             sift_thresh = feature_extract_param.get("sift_thresh")
-#             max_iters = feature_extract_param.get("max_iters")
-#
-#             if max_imfs is not None and max_imfs is not None and (
-#                     not isinstance(max_imfs, int) or max_imfs < 1 or max_imfs > 20):
-#                 valid_params = False
-#                 error_message = "max_imfs参数必须是1-20之间的整数或None"
-#
-#             if sift_thresh is not None and (
-#                     not isinstance(sift_thresh, (int, float)) or sift_thresh < 1e-12 or sift_thresh > 1e-4):
-#                 valid_params = False
-#                 error_message = "sift_thresh参数必须是1e-12到1e-4之间的浮点数"
-#
-#             if max_iters is not None and (not isinstance(max_iters, int) or max_iters < 100 or max_iters > 10000):
-#                 valid_params = False
-#                 error_message = "max_iters参数必须是100-10000之间的整数"
-#
-#         if not valid_params:
-#             return jsonify({
-#                 "state": 404,
-#                 "data": {
-#                     "success": False,
-#                     "message": f"参数验证失败: {error_message}"
-#                 }
-#             })
-#
-#         # 获取当前用户（这里使用系统默认值，实际应根据你的认证机制获取）
-#         current_user = "system"
-#
-#         # 将参数保存到数据库
-#         conn = get_db_connection()
-#         cursor = conn.cursor()
-#
-#         try:
-#             # 检查feature_sample_id是否存在
-#             if feature_sample_id:
-#                 # 查询该ID是否存在于数据库中
-#                 cursor.execute("""
-#                     SELECT feature_sample_id FROM tb_analysis_sample_feature
-#                     WHERE feature_sample_id = %s
-#                 """, (feature_sample_id,))
-#
-#                 existing_record = cursor.fetchone()
-#
-#                 if existing_record:
-#                     # 更新现有记录
-#                     cursor.execute("""
-#                         UPDATE tb_analysis_sample_feature
-#                         SET feature_extract = %s,
-#                             feature_extract_param = %s
-#                         WHERE feature_sample_id = %s
-#                     """, (
-#                         feature_extract,
-#                         json.dumps(feature_extract_param),
-#                         feature_sample_id
-#                     ))
-#                 else:
-#                     # feature_sample_id存在但记录不存在，返回错误
-#                     conn.close()
-#                     return jsonify({
-#                         "state": 404,
-#                         "data": {
-#                             "success": False,
-#                             "message": f"找不到ID为{feature_sample_id}的特征样本记录"
-#                         }
-#                     })
-#             else:
-#                 # 生成新的feature_sample_id
-#                 feature_sample_id = str(uuid.uuid4())
-#
-#                 # 创建新记录（部分字段设为空或默认值，因为这只是参数保存阶段）
-#                 cursor.execute("""
-#                     INSERT INTO tb_analysis_sample_feature (
-#                         feature_sample_id, feature_extract, feature_extract_param,
-#                         create_user, create_time
-#                     ) VALUES (%s, %s, %s, %s, %s)
-#                 """, (
-#                     feature_sample_id,
-#                     feature_extract,
-#                     json.dumps(feature_extract_param),
-#                     current_user,
-#                     datetime.datetime.now()
-#                 ))
-#
-#             # 提交事务
-#             conn.commit()
-#
-#             return jsonify({
-#                 "state": 200,
-#                 "data": {
-#                     "success": True,
-#                     "message": "参数保存成功",
-#                     "feature_sample_id": feature_sample_id,
-#                     "feature_extract": feature_extract,
-#                     "feature_extract_param": feature_extract_param
-#                 }
-#             })
-#
-#         except Exception as e:
-#             # 回滚事务
-#             conn.rollback()
-#             raise e
-#         finally:
-#             # 关闭数据库连接
-#             conn.close()
-#
-#     except Exception as e:
-#         return jsonify({
-#             "state": 404,
-#             "data": {
-#                 "success": False,
-#                 "message": f"参数保存失败: {str(e)}"
-#             }
-#         })
+@app.route('/api/analysis/train/feature/param/save', methods=['POST'])
+@token_required
+def save_feature_extraction_params():
+    """
+    保存特征提取参数设置到数据库
+
+    Request Body:
+        feature_sample_id: 样本标识，可以为空
+        feature_extract: 特征提取方法名称
+        feature_extract_param: 特征提取参数JSON
+
+    Returns:
+        保存结果的状态
+    """
+    try:
+        data = request.json
+        feature_sample_id = data.get('feature_sample_id', '')
+        feature_extract = data.get('feature_extract', '')
+        feature_extract_param = data.get('feature_extract_param', {})
+
+        # 验证特征提取方法是否存在
+        feature_methods = ["峭度指标", "直方图特征", "傅里叶变换", "小波变换", "经验模态分解", "Wigner-Ville分布"]
+        if feature_extract not in feature_methods:
+            return jsonify({
+                "state": 404,
+                "data": {
+                    "success": False,
+                    "message": f"无效的特征提取方法: {feature_extract}"
+                }
+            })
+
+        # 验证参数合法性
+        valid_params = True
+        error_message = ""
+
+        # 根据不同特征提取方法验证参数
+        if feature_extract == "直方图特征":
+            bins = feature_extract_param.get("bins")
+            if bins is not None and (not isinstance(bins, int) or bins < 2 or bins > 100):
+                valid_params = False
+                error_message = "bins参数必须是2-100之间的整数"
+
+        elif feature_extract == "小波变换":
+            wavelet_name = feature_extract_param.get("wavelet_name")
+            level = feature_extract_param.get("level")
+            valid_wavelets = ["haar", "db1", "db2", "db3", "db4", "db5", "sym2", "sym3", "sym4", "coif1", "coif2",
+                              "bior1.1", "bior1.3", "bior2.2", "bior2.4"]
+
+            if wavelet_name is not None and wavelet_name not in valid_wavelets:
+                valid_params = False
+                error_message = f"无效的小波基名称: {wavelet_name}"
+
+            if level is not None and level is not None and (not isinstance(level, int) or level < 1 or level > 10):
+                valid_params = False
+                error_message = "level参数必须是1-10之间的整数或None"
+
+        elif feature_extract == "经验模态分解":
+            max_imfs = feature_extract_param.get("max_imfs")
+            sift_thresh = feature_extract_param.get("sift_thresh")
+            max_iters = feature_extract_param.get("max_iters")
+
+            if max_imfs is not None and max_imfs is not None and (
+                    not isinstance(max_imfs, int) or max_imfs < 1 or max_imfs > 20):
+                valid_params = False
+                error_message = "max_imfs参数必须是1-20之间的整数或None"
+
+            if sift_thresh is not None and (
+                    not isinstance(sift_thresh, (int, float)) or sift_thresh < 1e-12 or sift_thresh > 1e-4):
+                valid_params = False
+                error_message = "sift_thresh参数必须是1e-12到1e-4之间的浮点数"
+
+            if max_iters is not None and (not isinstance(max_iters, int) or max_iters < 100 or max_iters > 10000):
+                valid_params = False
+                error_message = "max_iters参数必须是100-10000之间的整数"
+
+        if not valid_params:
+            return jsonify({
+                "state": 404,
+                "data": {
+                    "success": False,
+                    "message": f"参数验证失败: {error_message}"
+                }
+            })
+
+        # 获取当前用户（这里使用系统默认值，实际应根据你的认证机制获取）
+        current_user = "system"
+
+        # 将参数保存到数据库
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        try:
+            # 检查feature_sample_id是否存在
+            if feature_sample_id:
+                # 查询该ID是否存在于数据库中
+                cursor.execute("""
+                    SELECT feature_sample_id FROM tb_analysis_sample_feature
+                    WHERE feature_sample_id = %s
+                """, (feature_sample_id,))
+
+                existing_record = cursor.fetchone()
+
+                if existing_record:
+                    # 更新现有记录
+                    cursor.execute("""
+                        UPDATE tb_analysis_sample_feature
+                        SET feature_extract = %s,
+                            feature_extract_param = %s
+                        WHERE feature_sample_id = %s
+                    """, (
+                        feature_extract,
+                        json.dumps(feature_extract_param),
+                        feature_sample_id
+                    ))
+                else:
+                    # feature_sample_id存在但记录不存在，返回错误
+                    conn.close()
+                    return jsonify({
+                        "state": 404,
+                        "data": {
+                            "success": False,
+                            "message": f"找不到ID为{feature_sample_id}的特征样本记录"
+                        }
+                    })
+            else:
+                # 生成新的feature_sample_id
+                feature_sample_id = str(uuid.uuid4())
+
+                # 创建新记录（部分字段设为空或默认值，因为这只是参数保存阶段）
+                cursor.execute("""
+                    INSERT INTO tb_analysis_sample_feature (
+                        feature_sample_id, feature_extract, feature_extract_param,
+                        create_user, create_time
+                    ) VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    feature_sample_id,
+                    feature_extract,
+                    json.dumps(feature_extract_param),
+                    current_user,
+                    datetime.datetime.now()
+                ))
+
+            # 提交事务
+            conn.commit()
+
+            return jsonify({
+                "state": 200,
+                "data": {
+                    "success": True,
+                    "message": "参数保存成功",
+                    "feature_sample_id": feature_sample_id,
+                    "feature_extract": feature_extract,
+                    "feature_extract_param": feature_extract_param
+                }
+            })
+
+        except Exception as e:
+            # 回滚事务
+            conn.rollback()
+            raise e
+        finally:
+            # 关闭数据库连接
+            conn.close()
+
+    except Exception as e:
+        return jsonify({
+            "state": 404,
+            "data": {
+                "success": False,
+                "message": f"参数保存失败: {str(e)}"
+            }
+        })
 
 
 @app.route('/api/analysis/train/train/sample', methods=['GET'])

@@ -2150,7 +2150,7 @@ def get_model_data():
         return jsonify({"state": 500, "message": "数据库连接失败"}), 500  # 修改状态码
 
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)  # 使用 DictCursor
-    query = "SELECT model_id, model_name, model_data FROM tb_analysis_model"
+    query = "SELECT model_id, model_name FROM tb_analysis_model order by model_id"
 
     try:
         cursor.execute(query)

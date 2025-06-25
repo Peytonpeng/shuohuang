@@ -1,10 +1,10 @@
 import json
 import datetime
 from flask import request, jsonify, Blueprint
-import shuohuang_api.main.Config.getConnection as get_db_connection
+import main.Config.getConnection as get_db_connection
 import psycopg2
-from shuohuang_api.main.utils.visualization import Visualizer
-from shuohuang_api.main.utils.methods import Preprocessor
+from main.utils.visualization import Visualizer
+from main.utils.methods import Preprocessor
 preProcess = Blueprint('preprocess', __name__)
 
 

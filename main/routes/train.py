@@ -5,10 +5,10 @@ import uuid
 import joblib
 import torch
 from flask import request, jsonify, Blueprint
-import sh_analysis.main.Config.getConnection as get_db_connection
+import main.Config.getConnection as get_db_connection
 import psycopg2
 import threading
-from sh_analysis.main.utils.websocket_utils import run_training_with_websocket
+from main.utils.websocket_utils import run_training_with_websocket
 
 train = Blueprint('train', __name__)
 

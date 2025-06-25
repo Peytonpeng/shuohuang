@@ -1,5 +1,5 @@
-from sh_analysis.main.Config.getConnection import get_db_connection
-from sh_analysis.main.model.model_function import train_model, set_socketio_instance, set_emit_functions
+from main.Config.getConnection import get_db_connection
+from main.model.model_function import train_model, set_socketio_instance, set_emit_functions
 import datetime
 import psycopg2
 import psycopg2.extras
@@ -8,8 +8,8 @@ import json
 
 def run_training_with_websocket(training_sessions,current_training_instance_id, model_id_from_request, sample_data_json_with_labels,
                                 base_model_train_id_for_process, full_param_data, websocket_session_id):
-    from sh_analysis.main.Main import socketio
-    from sh_analysis.main.Main import logger
+    from main.Main import socketio
+    from main.Main import logger
 
     """
     带WebSocket通信的训练执行函数

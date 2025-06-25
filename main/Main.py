@@ -6,7 +6,7 @@ import routes.feature as feature_routes
 import routes.train as train_routes
 import routes.apply as apply_routes
 import logging
-from sh_analysis.main.model.model_function import set_socketio_instance
+from main.model.model_function import set_socketio_instance
 
 app = Flask(__name__)
 
@@ -26,4 +26,4 @@ logger = logging.getLogger(__name__) # 确保 logger 在这里被定义
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    socketio.run(app, host='0.0.0.0', port=5001, debug=False, allow_unsafe_werkzeug=True)

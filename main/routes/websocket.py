@@ -1,16 +1,9 @@
 import datetime
-import uuid
-import numpy as np
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask import request, jsonify, Blueprint, logging, app
-import sh_analysis.main.Config.getConnection as get_db_connection
-import psycopg2
 
-from sh_analysis.main.Main import logger
-from sh_analysis.main.routes.train import training_sessions
-from sh_analysis.main.utils import feature_extraction
-from sh_analysis.main.utils.visualization import Visualizer
-from sh_analysis.main.utils.methods import Preprocessor
+from main.Main import logger
+from main.routes.train import training_sessions
 import logging
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')

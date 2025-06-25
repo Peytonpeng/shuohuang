@@ -3,11 +3,11 @@ import datetime
 import uuid
 import numpy as np
 from flask import request, jsonify, Blueprint, logging
-import sh_analysis.main.Config.getConnection as get_db_connection
+import main.Config.getConnection as get_db_connection
 import psycopg2
-from sh_analysis.main.utils import feature_extraction
-from sh_analysis.main.utils.visualization import Visualizer
-from sh_analysis.main.utils.methods import Preprocessor
+from main.utils import feature_extraction
+from main.utils.visualization import Visualizer
+from main.utils.methods import Preprocessor
 import logging
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')

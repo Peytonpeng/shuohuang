@@ -5,7 +5,7 @@ import os
 import datetime
 from flask import Flask, request, jsonify, Blueprint
 import uuid
-import sh_analysis.main.Config.getConnection as get_db_connection
+import main.Config.getConnection as get_db_connection
 import psycopg2
 select = Blueprint('select', __name__)
 

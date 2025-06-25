@@ -3,10 +3,10 @@ import datetime
 import os
 import uuid
 from flask import request, jsonify, Blueprint
-import sh_analysis.main.Config.getConnection as get_db_connection
+import main.Config.getConnection as get_db_connection
 import psycopg2
 import pandas as pd
-from sh_analysis.main.Config.SaveConfig import UPLOAD_FOLDER
+from main.Config.SaveConfig import UPLOAD_FOLDER
 
 apply = Blueprint('apply', __name__)
 

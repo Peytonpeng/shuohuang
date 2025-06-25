@@ -1,4 +1,4 @@
-import sh_analysis.main.Config.DBConfig as db
+import main.Config.DBConfig as db
 import psycopg2
 from psycopg2 import Error
 

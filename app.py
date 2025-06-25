@@ -31,20 +31,40 @@ from flask_compress import Compress  # 第一行
 from auth import token_required, jwt_token, check_system_token
 from hello_routes import hello_blueprint
 
-# 配置日志 (确保在所有 logger 使用之前)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)  # 确保 logger 在这里被定义
+
 
 # 全局变量定义
 active_training_processes = {}
 training_sessions = {}
 
 app = Flask(__name__)
+
 Compress(app)
 app.secret_key = 'shuohuangapi'
 socketio = SocketIO(app, cors_allowed_origins="*")  # 允许跨域
+
 set_socketio_instance(socketio)
 
+
+if not app.debug:
+    # 设置日志级别为DEBUG，并配置日志格式和文件位置
+    gunicorn_logger = logging.getLogger('gunicorn.error')
+    handler = logging.FileHandler('error.log')
+    handler.setLevel(logging.ERROR)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    gunicorn_logger.addHandler(handler)
+else:
+    # 开发模式下，可以在控制台输出日志
+    app.logger.setLevel(logging.DEBUG)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    app.logger.addHandler(handler)
+
+# 配置日志 (确保在所有 logger 使用之前)
+logger = logging.getLogger(__name__)  # 确保 logger 在这里被定义
 
 # === 通用WebSocket事件发送函数 ===
 def emit_process_progress(room_id, process_type, data):
@@ -57,7 +77,7 @@ def emit_process_progress(room_id, process_type, data):
             **data
         }
         socketio.emit('process_progress', payload, namespace='/ns_analysis', room=room_id)
-        logger.info(f"发送{process_type}进度消息到房间 {room_id} (ns /ns_analysis): {data.get('message', '')}")
+        logger.debug(f"发送{process_type}进度消息到房间 {room_id} (ns /ns_analysis): {data.get('message', '')}")
     except Exception as e:
         logger.error(f"发送{process_type}进度消息失败 (房间 {room_id}): {e}", exc_info=True)
 
@@ -72,7 +92,7 @@ def emit_process_completed(room_id, process_type, data):
             **data
         }
         socketio.emit('process_completed', payload, namespace='/ns_analysis', room=room_id)
-        logger.info(f"发送{process_type}完成消息到房间 {room_id} (ns /ns_analysis)")
+        logger.debug(f"发送{process_type}完成消息到房间 {room_id} (ns /ns_analysis)")
     except Exception as e:
         logger.error(f"发送{process_type}完成消息失败 (房间 {room_id}): {e}", exc_info=True)
 
@@ -121,7 +141,7 @@ def emit_epoch_result(room_id, data):  # 参数名改为 room_id
             **data
         }
         socketio.emit('process_result', payload, namespace='/ns_analysis', room=room_id)
-        logger.info(f"发送epoch结果到房间 {room_id} (ns /ns_analysis): epoch {data.get('global_epoch', '')}")
+        logger.debug(f"发送epoch结果到房间 {room_id} (ns /ns_analysis): epoch {data.get('global_epoch', '')}")
     except Exception as e:
         logger.error(f"发送epoch结果消息失败 (房间 {room_id}): {e}", exc_info=True)
 
@@ -137,7 +157,7 @@ def emit_round_result(room_id, data):  # 参数名改为 room_id
             **data
         }
         socketio.emit('process_result', payload, namespace='/ns_analysis', room=room_id)
-        logger.info(f"发送轮次结果到房间 {room_id} (ns /ns_analysis): round {data.get('current_round', '')}")
+        logger.debug(f"发送轮次结果到房间 {room_id} (ns /ns_analysis): round {data.get('current_round', '')}")
     except Exception as e:
         logger.error(f"发送轮次结果消息失败 (房间 {room_id}): {e}", exc_info=True)
 
@@ -149,7 +169,7 @@ def emit_round_result(room_id, data):  # 参数名改为 room_id
 @socketio.on('connect', namespace='/ns_analysis')
 def handle_ns_analysis_connect():
     """处理客户端连接到 /ns_analysis namespace"""
-    logger.info(f"客户端 {request.sid} 连接到 /ns_analysis namespace")
+    logger.debug(f"客户端 {request.sid} 连接到 /ns_analysis namespace")
     emit('connected_to_namespace', {
         'message': '已连接到 /ns_analysis 命名空间。请发送 join_room 事件加入指定房间。',
         'sid': request.sid,
@@ -163,10 +183,10 @@ def handle_ns_analysis_disconnect():
     room_to_leave = session.get('room')
     if room_to_leave:
         leave_room(room_to_leave)
-        logger.info(f"客户端 {request.sid} 自动离开房间 {room_to_leave} (从 /ns_analysis namespace 断开)")
+        logger.debug(f"客户端 {request.sid} 自动离开房间 {room_to_leave} (从 /ns_analysis namespace 断开)")
         session.pop('room', None)
     else:
-        logger.info(f"客户端 {request.sid} 从 /ns_analysis namespace 断开 (未在 session 中找到房间信息)")
+        logger.debug(f"客户端 {request.sid} 从 /ns_analysis namespace 断开 (未在 session 中找到房间信息)")
 
 
 @socketio.on('join_room', namespace='/ns_analysis')
@@ -184,7 +204,7 @@ def on_join_ns_analysis_room(data):
 
     join_room(room_to_join)
     session['room_id'] = room_to_join
-    logger.info(f"客户端 {request.sid} 加入房间: {room_to_join} (ns /ns_analysis)")
+    logger.debug(f"客户端 {request.sid} 加入房间: {room_to_join} (ns /ns_analysis)")
 
     emit('room_joined', {
         'message': f'成功加入房间: {room_to_join}',
@@ -207,7 +227,7 @@ def on_leave_ns_analysis_room(data):
         return
 
     leave_room(room_to_leave)
-    logger.info(f"客户端 {request.sid} 主动离开房间: {room_to_leave} (ns /ns_analysis)")
+    logger.debug(f"客户端 {request.sid} 主动离开房间: {room_to_leave} (ns /ns_analysis)")
 
     if session.get('room') == room_to_leave:
         session.pop('room', None)
@@ -238,14 +258,20 @@ active_training_processes = {}
 from model_function import train_model
 
 # PostgreSQL数据库连接配置
+# DB_CONFIG = {
+#     'host': '10.10.1.127',
+#     'port': '15432',
+#     'database': 'shuohuang',  # 连接到shuohuang数据库
+#     'user': 'resafety',
+#     'password': 'Resafety!@#$%12345postgresre'
+# }
 DB_CONFIG = {
-    'host': '10.10.1.127',
-    'port': '15432',
-    'database': 'shuohuang',  # 连接到shuohuang数据库
-    'user': 'resafety',
-    'password': 'Resafety!@#$%12345postgresre'
+    'host': '127.0.0.1',
+    'port': '5432',
+    'database': 'postgres',  # 连接到shuohuang数据库
+    'user': 'postgres',
+    'password': '123456huxian'
 }
-
 UPLOAD_FOLDER = "uploads"  # 服务器文件存储路径
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # 创建文件夹（如果不存在）
 
@@ -262,7 +288,7 @@ def get_db_connection():
         )
         return conn
     except Error as e:
-        print(f"数据库连接失败: {e}")
+        logger.error(f"数据库连接失败: {e}")
         return None
 
 
@@ -279,7 +305,7 @@ def token():
         value = jwt_token(SystemToken)
         # 将token保存到session作为默认的WebSocket room id
         session['room_id'] = value['token']
-        logger.info(f"用户登录成功，设置room ID为: {value['token']}")
+        logger.debug(f"用户登录成功，设置room ID为: {value['token']}")
         return jsonify(value)
 
 
@@ -511,13 +537,13 @@ def get_wave_data():
         WHERE original_sample_id IN ({placeholders})
         """
 
-        print(f"执行的 SQL 查询: {query}")  # 打印执行的 SQL 语句
-        print(f"传递的参数: {tuple(sample_ids_list)}")  # 打印传递的参数
+        logger.debug(f"执行的 SQL 查询: {query}")  # 打印执行的 SQL 语句
+        logger.debug(f"传递的参数: {tuple(sample_ids_list)}")  # 打印传递的参数
 
         cursor.execute(query, tuple(sample_ids_list))
         results = cursor.fetchall()
 
-        print(f"查询结果数量: {len(results)}")  # 打印查询结果的数量
+        logger.debug(f"查询结果数量: {len(results)}")  # 打印查询结果的数量
 
         if not results:
             return jsonify({
@@ -537,7 +563,7 @@ def get_wave_data():
                     "sample_data": sample_data  # 直接返回完整数据
                 })
             except json.JSONDecodeError:
-                print(f"JSON 解析错误的数据: {row['sample_data']}")  # 打印解析失败的数据
+                logger.error(f"JSON 解析错误的数据: {row['sample_data']}")  # 打印解析失败的数据
                 continue  # 跳过格式错误的数据
 
         return jsonify({
@@ -546,7 +572,7 @@ def get_wave_data():
         }), 200
 
     except Exception as e:
-        print(f"发生异常: {e}")  # 打印异常信息
+        logger.error(f"发生异常: {e}")  # 打印异常信息
         return jsonify({"state": 500, "message": f"操作失败: {str(e)}"}), 500
 
     finally:
@@ -836,7 +862,7 @@ def preprocess_confirm():
                 if valid:
                     pre_process_methods_from_input.append(method)
                 else:
-                    print(f"警告：忽略无效的处理方法 '{method}'")
+                    logger.warning(f"警告：忽略无效的处理方法 '{method}'")
 
         conn = get_db_connection()
         if conn is None:
@@ -934,7 +960,7 @@ def preprocess_confirm():
                             applied_methods_list_for_log.append(method_for_step)  # 记录应用的具体方法
                             applied_steps[step] = True  # 标记该步骤已应用
                         except Exception as method_e:
-                            print(f"应用方法 '{method_for_step}' 到样本 {original_id} 时出错: {method_e}")
+                            logger.error(f"应用方法 '{method_for_step}' 到样本 {original_id} 时出错: {method_e}")
                             applied_methods_list_for_log.append(f"应用 {method_for_step} 失败")
 
                 # 保留 after_process_data 结构
@@ -981,13 +1007,13 @@ def preprocess_confirm():
                 })
 
             except json.JSONDecodeError as e:
-                print(f"样本 {original_id} 的数据解析失败: {e}")
+                logger.error(f"样本 {original_id} 的数据解析失败: {e}")
                 continue  # 对于单个样本的处理失败，记录错误并跳过该样本
             except ValueError as e:
-                print(f"样本 {original_id} 预处理方法错误: {str(e)}")
+                logger.error(f"样本 {original_id} 预处理方法错误: {str(e)}")
                 continue  # 对于单个样本的处理失败，记录错误并跳过该样本
             except Exception as e:
-                print(f"处理样本 {original_id} 时出错: {e}")
+                logger.error(f"处理样本 {original_id} 时出错: {e}")
                 import traceback
                 traceback.print_exc()
                 continue  # 对于单个样本的处理失败，记录错误并跳过该样本
@@ -1015,7 +1041,7 @@ def preprocess_confirm():
         # 捕获整个请求处理过程中的异常（如数据库连接失败，JSON解析错误等）
         if conn:
             conn.rollback()  # 如果发生任何未捕获的异常，回滚整个事务
-        print(f"服务器内部错误: {str(e)}")
+        logger.error(f"服务器内部错误: {str(e)}")
         import traceback
         traceback.print_exc()
 
@@ -1204,7 +1230,7 @@ def fetch_samples_prioritized():
     except Exception as e:
         # 记录错误
         # 实际应用中应该使用 proper logging framework like app.logger
-        print(f"获取样本列表失败: {str(e)}")
+        logger.error(f"获取样本列表失败: {str(e)}")
         if conn:
             # 对于GET请求，rollback通常不是必须的
             pass
@@ -2162,7 +2188,7 @@ def get_model_data():
         return jsonify({"state": 200, "data": results})  # 无需格式化结果
 
     except psycopg2.Error as e:  # 捕获psycopg2的异常
-        print(f"Error while executing query: {e}")
+        logger.error(f"Error while executing query: {e}")
         return jsonify({"state": 500, "message": f"数据库查询失败: {str(e)}"}), 500  # 修改状态码
 
     finally:
@@ -2269,7 +2295,7 @@ def start_model_training():
         if actual_model_name in classification_model_names:
             if num_unique_labels_generated > 0:
                 if param_data_req.get("num_classes") != num_unique_labels_generated:
-                    logger.info(
+                    logger.debug(
                         f"信息: 模型 '{actual_model_name}' 的 num_classes 从请求的 {param_data_req.get('num_classes')} 更新为自动生成的标签数量 {num_unique_labels_generated}。")
                 param_data_req["num_classes"] = num_unique_labels_generated
 
@@ -2428,7 +2454,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
             "model_definition_id": model_definition_id
         })
 
-        logger.info(
+        logger.debug(
             f"开始 {actual_model_name_for_training} 模型训练 (训练实例ID: {current_training_instance_id}, 定义 ID: {model_definition_id})")
 
         # **调用 train_model 函数，传递 stop_event**
@@ -2447,7 +2473,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
 
         if is_stopped_by_user:
             message = "训练已中止"
-            logger.info(f"训练 {current_training_instance_id} 已由用户中止。")
+            logger.debug(f"训练 {current_training_instance_id} 已由用户中止。")
             emit_process_completed(websocket_session_id, 'training', {
                 "message": message,
                 "status": "stopped",
@@ -2496,7 +2522,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
                 create_user_process, happen_time_process
             ))
             conn.commit()
-            logger.info(f"最终训练结果已保存 (ID: {process_record_id_val})。")
+            logger.debug(f"最终训练结果已保存 (ID: {process_record_id_val})。")
 
             end_time = datetime.datetime.now()
             emit_process_completed(websocket_session_id,'training', {
@@ -2538,7 +2564,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
             cursor.close()
         if conn and not conn.closed:
             conn.close()
-        logger.info(f"训练流程结束 (ID: {current_training_instance_id}).")
+        logger.debug(f"训练流程结束 (ID: {current_training_instance_id}).")
 
 # --- 新增：中止训练接口 ---
 @app.route('/api/analysis/train/train/cancel', methods=['POST'])
@@ -2561,9 +2587,9 @@ def stop_model_training():
     training_thread = process_info["thread"]
 
     if training_thread and training_thread.is_alive():
-        logger.info(f"收到停止训练请求，训练ID: {training_instance_id}")
+        logger.debug(f"收到停止训练请求，训练ID: {training_instance_id}")
         stop_event.set()  # 设置停止事件，向线程发出停止信号
-        logger.info(f"停止事件已设置: {stop_event.is_set()}")
+        logger.debug(f"停止事件已设置: {stop_event.is_set()}")
 
         # 更新训练状态
         # 通过遍历找到正确的 session
@@ -2626,16 +2652,16 @@ def save_model():
 
         # **2. 读取训练后的模型参数**
         model_dir = "./saved_models"
-        print(f"Model name: {model_name}")  # 打印 model_name
-        print(f"Model directory: {model_dir}")  # 打印 model_dir
+        logger.info(f"Model name: {model_name}")  # 打印 model_name
+        logger.info(f"Model directory: {model_dir}")  # 打印 model_dir
         model_files = [f for f in os.listdir(model_dir) if f.startswith(model_name)]
         model_files.sort(reverse=True)  # 按时间降序排序
-        print(f"Files in model directory: {os.listdir(model_dir)}")  # 列出目录内容
+        logger.info(f"Files in model directory: {os.listdir(model_dir)}")  # 列出目录内容
         if not model_files:
             return jsonify({"state": 404, "message": "Trained model file not found"}), 404
 
         model_path = os.path.join(model_dir, model_files[0])
-        print(f"Model path: {model_path}")  # 打印 model_path
+        logger.info(f"Model path: {model_path}")  # 打印 model_path
         model_data = None
         if model_path.endswith('.pt'):
             model_data = torch.load(model_path, map_location=torch.device('cpu'))
@@ -2672,7 +2698,7 @@ def save_model():
         return jsonify({"state": 200, "data": {"success": "true", "message": "Model saved successfully"}}), 200
 
     except psycopg2.Error as e:
-        print(f"Error saving model: {e}")
+        logger.error(f"Error saving model: {e}")
         return jsonify({"state": 500, "message": "Failed to save model"}), 500
 
     finally:
@@ -2708,7 +2734,7 @@ def download_model():
         return jsonify({"state": 200, "data": {"model_train_data": model_result["model_data"]}}), 200
 
     except psycopg2.Error as e:
-        print(f"Database error: {e}")
+        logger.error(f"Database error: {e}")
         return jsonify({"state": 500, "message": "Failed to fetch model data"}), 500
 
     finally:
@@ -2741,7 +2767,7 @@ def getTrainModelParam():
         return jsonify({"state": 200, "data": param}), 200
     except Exception as e:
         # 捕获任何服务器内部错误
-        print(f"获取模型数据失败: {str(e)}")  # 打印错误以便调试
+        logger.error(f"获取模型数据失败: {str(e)}")  # 打印错误以便调试
         return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
     finally:
         if cursor:
@@ -2816,7 +2842,7 @@ def save_train_model_param():
         })
 
     except Exception as e:
-        print(f"保存模型参数失败: {str(e)}")
+        logger.error(f"保存模型参数失败: {str(e)}")
         # 避免将底层错误信息直接暴露给客户端
         return jsonify({"state": 500, "message": "服务器内部错误"}), 500
 
@@ -3218,7 +3244,7 @@ def get_apply_wave_data():
                 })
             except json.JSONDecodeError as e:
                 # 如果 sample_data 不是有效的 JSON 字符串，则跳过或记录错误
-                print(f"样本 {row['apply_sample_id']} 的数据解析失败: {e}")
+                logger.error(f"样本 {row['apply_sample_id']} 的数据解析失败: {e}")
                 continue  # 或者可以返回一个错误信息，取决于业务需求
 
         if not response_data:
@@ -3278,7 +3304,7 @@ def get_apply_models():
 
     except Exception as e:
         # 捕获任何服务器内部错误
-        print(f"获取模型数据失败: {str(e)}")  # 打印错误以便调试
+        logger.error(f"获取模型数据失败: {str(e)}")  # 打印错误以便调试
         return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
     finally:
         if cursor:
@@ -3406,7 +3432,7 @@ def add_apply_sample_to_library():
     except Exception as e:
         if conn:
             conn.rollback()  # 发生异常时回滚数据库操作
-        print(f"添加样本至样本库失败: {str(e)}")  # 打印错误以便调试
+        logger.error(f"添加样本至样本库失败: {str(e)}")  # 打印错误以便调试
         return jsonify({
             "state": 500,
             "data": {

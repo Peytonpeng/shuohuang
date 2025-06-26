@@ -9,8 +9,6 @@ import model_function
 # 先导入set_socketio_instance，后面设置完emit函数后再导入train_model
 from model_function import set_socketio_instance
 import pandas as pd
-import base64
-import io
 import os
 import datetime
 from psycopg2 import Error
@@ -19,8 +17,6 @@ import psycopg2.extras
 import feature_extraction
 # 预处理的import
 from methods import Preprocessor
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
 from visualization import Visualizer
 import logging
 from flask import Flask, request, jsonify

@@ -1,0 +1,28 @@
+version: '3'
+services:
+  simulate:
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 20000
+        hard: 40000
+    working_dir: /app
+    image: sh_analysis:v1
+    container_name: sh_analysis
+    environment:
+      - TZ=Asia/Shanghai
+      - LANG=C.UTF-8
+    restart: always
+    volumes:
+      - ../sh_analysis:/app
+    command: python3 /app/app.py
+    ports:
+      - "5001:5001"
+    network_mode: bridge
+    security_opt:
+      -  seccomp=unconfined
+    logging:
+      options:
+        max-size: "12m"
+        max-file: "5"
+      driver: json-file

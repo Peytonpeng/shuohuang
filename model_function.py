@@ -389,7 +389,7 @@ def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_
 
     # 对 Sklearn 模型，我们在这里发送完成消息
     if not current_message:
-        emit_process_completed(training_id, {
+        emit_process_completed(training_id, 'training',{
             'message': f'{model_type} 训练评估完成',
             'results': results
         })

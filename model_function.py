@@ -11,7 +11,7 @@ from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.cluster import KMeans
-from sklearn.metrics import recall_score, f1_score, mean_squared_error, accuracy_score
+from sklearn.metrics import recall_score, f1_score, mean_squared_error, accuracy_score, silhouette_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import joblib
@@ -374,6 +374,26 @@ def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_
             if hasattr(model, 'cluster_centers_'):
                 cluster_centers_list = model.cluster_centers_.tolist()
 
+
+            # 获取 K-Means 预测的簇标签 (在训练数据上)
+            labels_pred_train = model.labels_
+
+            # --- K-Means 内部评估指标：只添加轮廓系数 ---
+            silhouette_score_val = None
+
+            # 内部指标通常在训练数据上计算
+            # 确保数据点数大于1，且聚类数大于1，并且至少有两个不同的簇才能计算
+            if X_train.shape[0] > 1 and model.n_clusters > 1 and len(np.unique(labels_pred_train)) > 1:
+                try:
+                    silhouette_score_val = silhouette_score(X_train, labels_pred_train)
+                except Exception as e:
+                    print(f"计算 K-Means 轮廓系数时出错: {e}")
+            else:
+                print("警告: 数据不足或聚类数量不满足要求，跳过 K-Means 轮廓系数计算。")
+
+
+
+
     except Exception as e:
         error_msg = f"模型 {model_type} 训练或评估失败: {str(e)}, {traceback.format_exc()}"
         emit_process_error(training_id, 'training', error_msg)
@@ -385,11 +405,13 @@ def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_
     if f1 is not None: results['F1值'] = f1
     if accuracy is not None: results['准确率'] = accuracy
     if cluster_centers_list is not None: results['聚类中心'] = cluster_centers_list
+    # 新增轮廓系数
+    if silhouette_score_val is not None: results['轮廓系数'] = float(silhouette_score_val)
     results['message'] = current_message if current_message else f'{model_type} 评估完成'
 
     # 对 Sklearn 模型，我们在这里发送完成消息
     if not current_message:
-        emit_process_completed(training_id, {
+        emit_process_completed(training_id,'training', {
             'message': f'{model_type} 训练评估完成',
             'results': results
         })
@@ -556,7 +578,8 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
     #线性回归：
     lr_fit_intercept = param_data.get("lr_fit_intercept", True)  # Whether to calculate the intercept
     #聚类：
-    kmeans_n_clusters_param = param_data.get("kmeans_n_clusters", num_classes_param if num_classes_param > 0 else 2)
+    # kmeans_n_clusters_param = param_data.get("kmeans_n_clusters", num_classes_param if num_classes_param > 0 else 2)
+    kmeans_n_clusters_param = param_data.get("kmeans_n_clusters", 5)
 
 
 
@@ -638,7 +661,8 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
                 print(f"保存模型 {model_name} 失败: {e}")
 
     print(f"模型 {model_name} 训练完成。结果: {result_metrics}")
-    return model_instance, result_metrics
+    # 新增model_path,模型保存路径
+    return model_instance, result_metrics, model_path
 
 
 

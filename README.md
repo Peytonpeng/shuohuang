@@ -35,3 +35,45 @@
 4.  [GVP](https://gitee.com/gvp) 全称是 Gitee 最有价值开源项目，是综合评定出的优秀开源项目
 5.  Gitee 官方提供的使用手册 [https://gitee.com/help](https://gitee.com/help)
 6.  Gitee 封面人物是一档用来展示 Gitee 会员风采的栏目 [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+
+// 逻辑回归:
+[
+    {
+        "param_name":"lr_max_iter",
+        "param_values": [100,1000,2000]
+        "default_value": "100",
+    },
+    {
+        "param_name":"lr_C";,
+        "param_values": [0.1,1,10],
+        "default_value": "1",
+    },
+    {
+        "param_name":"lr_solver";,
+        "param_values": ["liblinear","lbfgs","sage"],
+        "default_value": "sage",
+    }
+]
+
+
+[{
+		"param_name": "num_classes",
+		"param_values": [3, 5, 10],
+		"default_value": 5
+	},
+	{
+		"param_name": "num_rounds",
+		"param_values": [5, 10, 20],
+		"default_value": 5
+	},
+	{
+		"param_name": "epochs_per_round",
+		"param_values": [100, 200, 300],
+		"default_value": 100
+	},
+	{
+		"param_name": "lr",
+		"param_values": [0.01, 0.001, 0.0001],
+		"default_value": 0.001
+	}
+]

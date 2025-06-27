@@ -2,7 +2,7 @@ import datetime
 from functools import wraps
 import jwt
 from flask import request, jsonify
-from constant import SECRET_KEY
+from config import SECRET_KEY
 
 # 权限校验 - 接口wraps装饰器
 def token_required(f):

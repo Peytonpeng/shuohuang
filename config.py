@@ -1,6 +1,6 @@
 # Token
 # 配置密钥（用于签名和验证）
-SECRET_KEY = 'shuohuang'
+SECRET_KEY = 'shuohuangapi'
 
 # PostgreSQL数据库连接配置
 # DB_CONFIG = {

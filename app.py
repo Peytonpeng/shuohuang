@@ -26,7 +26,7 @@ import uuid
 from flask_compress import Compress  # 第一行
 from auth import token_required, jwt_token, check_system_token
 from hello_routes import hello_blueprint
-
+from config import DB_CONFIG, SECRET_KEY, UPLOAD_FOLDER
 
 
 # 全局变量定义
@@ -36,7 +36,7 @@ training_sessions = {}
 app = Flask(__name__)
 
 Compress(app)
-app.secret_key = 'shuohuangapi'
+app.secret_key = SECRET_KEY
 socketio = SocketIO(app, cors_allowed_origins="*")  # 允许跨域
 
 set_socketio_instance(socketio)
@@ -248,23 +248,7 @@ active_training_processes = {}
 # 在设置完emit函数后导入train_model
 from model_function import train_model
 
-# PostgreSQL数据库连接配置
-# DB_CONFIG = {
-#     'host': '10.10.1.127',
-#     'port': '15432',
-#     'database': 'shuohuang',  # 连接到shuohuang数据库
-#     'user': 'resafety',
-#     'password': 'Resafety!@#$%12345postgresre'
-# }
-DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': '5432',
-    'database': 'postgres',  # 连接到shuohuang数据库
-    'user': 'postgres',
-    'password': '123456huxian'
-}
 
-UPLOAD_FOLDER = "uploads"  # 服务器文件存储路径
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # 创建文件夹（如果不存在）
 
 

@@ -73,8 +73,7 @@ def emit_process_progress(room_id, process_type, data):
             **data
         }
         socketio.emit('process_progress', payload, namespace='/ns_analysis', room=room_id)
-        #socketio.emit('process_completed', payload, namespace='/ns_analysis', room=room_id)
-        logger.debug(f"发送{process_type}进度消息到房间 {room_id} (ns /ns_analysis): {data.get('message', '')}")
+        logger.info(f"发送{process_type}进度消息到房间 {room_id} (ns /ns_analysis): {data.get('message', '')}")
     except Exception as e:
         logger.error(f"发送{process_type}进度消息失败 (房间 {room_id}): {e}", exc_info=True)
 
@@ -264,6 +263,7 @@ DB_CONFIG = {
     'user': 'postgres',
     'password': '123456huxian'
 }
+
 UPLOAD_FOLDER = "uploads"  # 服务器文件存储路径
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # 创建文件夹（如果不存在）
 
@@ -854,7 +854,7 @@ def preprocess_confirm():
                 if valid:
                     pre_process_methods_from_input.append(method)
                 else:
-                    logger.warning(f"警告：忽略无效的处理方法 '{method}'")
+                    print(f"警告：忽略无效的处理方法 '{method}'")
 
         conn = get_db_connection()
         if conn is None:
@@ -952,7 +952,7 @@ def preprocess_confirm():
                             applied_methods_list_for_log.append(method_for_step)  # 记录应用的具体方法
                             applied_steps[step] = True  # 标记该步骤已应用
                         except Exception as method_e:
-                            logger.error(f"应用方法 '{method_for_step}' 到样本 {original_id} 时出错: {method_e}")
+                            print(f"应用方法 '{method_for_step}' 到样本 {original_id} 时出错: {method_e}")
                             applied_methods_list_for_log.append(f"应用 {method_for_step} 失败")
 
                 # 保留 after_process_data 结构
@@ -999,13 +999,13 @@ def preprocess_confirm():
                 })
 
             except json.JSONDecodeError as e:
-                logger.error(f"样本 {original_id} 的数据解析失败: {e}")
+                print(f"样本 {original_id} 的数据解析失败: {e}")
                 continue  # 对于单个样本的处理失败，记录错误并跳过该样本
             except ValueError as e:
-                logger.error(f"样本 {original_id} 预处理方法错误: {str(e)}")
+                print(f"样本 {original_id} 预处理方法错误: {str(e)}")
                 continue  # 对于单个样本的处理失败，记录错误并跳过该样本
             except Exception as e:
-                logger.error(f"处理样本 {original_id} 时出错: {e}")
+                print(f"处理样本 {original_id} 时出错: {e}")
                 import traceback
                 traceback.print_exc()
                 continue  # 对于单个样本的处理失败，记录错误并跳过该样本
@@ -1033,7 +1033,7 @@ def preprocess_confirm():
         # 捕获整个请求处理过程中的异常（如数据库连接失败，JSON解析错误等）
         if conn:
             conn.rollback()  # 如果发生任何未捕获的异常，回滚整个事务
-        logger.error(f"服务器内部错误: {str(e)}")
+        print(f"服务器内部错误: {str(e)}")
         import traceback
         traceback.print_exc()
 
@@ -1222,7 +1222,7 @@ def fetch_samples_prioritized():
     except Exception as e:
         # 记录错误
         # 实际应用中应该使用 proper logging framework like app.logger
-        logger.error(f"获取样本列表失败: {str(e)}")
+        print(f"获取样本列表失败: {str(e)}")
         if conn:
             # 对于GET请求，rollback通常不是必须的
             pass
@@ -2180,7 +2180,7 @@ def get_model_data():
         return jsonify({"state": 200, "data": results})  # 无需格式化结果
 
     except psycopg2.Error as e:  # 捕获psycopg2的异常
-        logger.error(f"Error while executing query: {e}")
+        print(f"Error while executing query: {e}")
         return jsonify({"state": 500, "message": f"数据库查询失败: {str(e)}"}), 500  # 修改状态码
 
     finally:
@@ -2287,7 +2287,7 @@ def start_model_training():
         if actual_model_name in classification_model_names:
             if num_unique_labels_generated > 0:
                 if param_data_req.get("num_classes") != num_unique_labels_generated:
-                    logger.debug(
+                    logger.info(
                         f"信息: 模型 '{actual_model_name}' 的 num_classes 从请求的 {param_data_req.get('num_classes')} 更新为自动生成的标签数量 {num_unique_labels_generated}。")
                 param_data_req["num_classes"] = num_unique_labels_generated
 
@@ -2450,7 +2450,8 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
             f"开始 {actual_model_name_for_training} 模型训练 (训练实例ID: {current_training_instance_id}, 定义 ID: {model_definition_id})")
 
         # **调用 train_model 函数，传递 stop_event**
-        trained_model_instance, result_dict_from_train = model_function.train_model(
+        # 新增model_path
+        trained_model_instance, result_dict_from_train, model_path = model_function.train_model(
             json_data=sample_data_json_with_labels,
             label_column="label",
             model_name=actual_model_name_for_training,
@@ -2458,6 +2459,21 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
             training_id=websocket_session_id,
             stop_event=stop_event # **传递 stop_event**
         )
+
+        #将模型路径保存进数据表tb_analysis_model_train，model_artifact_path字段
+        try:
+            cursor.execute(
+                "UPDATE tb_analysis_model_train "
+                "SET model_artifact_path = %s "
+                "WHERE model_train_id = %s",
+                (model_path, current_training_instance_id)
+            )
+            conn.commit()
+            print(f"成功更新模型路径: {model_path}")
+        except Exception as e:
+            print(f"更新模型路径失败: {e}")
+            conn.rollback()
+
 
         # 检查训练结果，首先判断是否是用户中止
         is_stopped_by_user = stop_event.is_set()
@@ -2514,7 +2530,7 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
                 create_user_process, happen_time_process
             ))
             conn.commit()
-            logger.debug(f"最终训练结果已保存 (ID: {process_record_id_val})。")
+            logger.info(f"最终训练结果已保存 (ID: {process_record_id_val})。")
 
             end_time = datetime.datetime.now()
             emit_process_completed(websocket_session_id,'training', {
@@ -2557,6 +2573,8 @@ def run_training_with_websocket(current_training_instance_id, model_id_from_requ
         if conn and not conn.closed:
             conn.close()
         logger.debug(f"训练流程结束 (ID: {current_training_instance_id}).")
+
+
 
 # --- 新增：中止训练接口 ---
 @app.route('/api/analysis/train/train/cancel', methods=['POST'])
@@ -2614,79 +2632,180 @@ def stop_model_training():
         }), 409
 
 
+
+# @app.route('/api/analysis/train/train/model/save', methods=['POST'])
+# @token_required
+# def save_model():
+#     data = request.get_json()
+#     if not data or "model_train_id" not in data:
+#         return jsonify({"state": 400, "message": "Invalid input data"}), 400
+#
+#     model_train_id = data["model_train_id"]
+#     create_user = "system"
+#     create_time = datetime.datetime.now()
+#
+#     conn = get_db_connection()
+#     if conn is None:
+#         return jsonify({"state": 500, "message": "Database connection failed"}), 500
+#
+#     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+#
+#     try:
+#         # **1. 查询模型信息**
+#         cursor.execute("SELECT model_id, model_train_name FROM tb_analysis_model_train WHERE model_train_id = %s",
+#                        (model_train_id,))
+#         model_result = cursor.fetchone()
+#         if not model_result:
+#             return jsonify({"state": 404, "message": "Model training record not found"}), 404
+#
+#         model_id = model_result["model_id"]
+#         model_name = model_result["model_train_name"]
+#
+#         # **2. 读取训练后的模型参数**
+#         model_dir = "./saved_models"
+#         print(f"Model name: {model_name}")  # 打印 model_name
+#         print(f"Model directory: {model_dir}")  # 打印 model_dir
+#         model_files = [f for f in os.listdir(model_dir) if f.startswith(model_name)]
+#         model_files.sort(reverse=True)  # 按时间降序排序
+#         print(f"Files in model directory: {os.listdir(model_dir)}")  # 列出目录内容
+#         if not model_files:
+#             return jsonify({"state": 404, "message": "Trained model file not found"}), 404
+#
+#         model_path = os.path.join(model_dir, model_files[0])
+#         print(f"Model path: {model_path}")  # 打印 model_path
+#         model_data = None
+#         if model_path.endswith('.pt'):
+#             model_data = torch.load(model_path, map_location=torch.device('cpu'))
+#         elif model_path.endswith('.joblib'):
+#             with open(model_path, "rb") as f:
+#                 model_data = joblib.load(f)
+#
+#         if model_data is None:
+#             return jsonify({"state": 404, "message": "Trained model file not found"}), 404
+#
+#         model_data_json = json.dumps(model_data, default=str)  # 确保数据可序列化
+#
+#         # **3. 插入或更新 `tb_analysis_model` 表**
+#         cursor.execute("SELECT model_id FROM tb_analysis_model WHERE model_id = %s", (model_id,))
+#         existing_model = cursor.fetchone()
+#
+#         if existing_model:
+#             query_update = """
+#             UPDATE tb_analysis_model
+#             SET model_train_id = %s, model_name = %s, model_data = %s, create_user = %s, create_time = %s
+#             WHERE model_id = %s
+#             """
+#             cursor.execute(query_update,
+#                            (model_train_id, model_name, model_data_json, create_user, create_time, model_id))
+#         else:
+#             query_insert = """
+#             INSERT INTO tb_analysis_model (model_id, model_train_id, model_name, model_data, create_user, create_time)
+#             VALUES (%s, %s, %s, %s, %s, %s)
+#             """
+#             cursor.execute(query_insert,
+#                            (model_id, model_train_id, model_name, model_data_json, create_user, create_time))
+#
+#         conn.commit()
+#         return jsonify({"state": 200, "data": {"success": "true", "message": "Model saved successfully"}}), 200
+#
+#     except psycopg2.Error as e:
+#         print(f"Error saving model: {e}")
+#         return jsonify({"state": 500, "message": "Failed to save model"}), 500
+#
+#     finally:
+#         cursor.close()
+#         conn.close()
+
+#下载模型接口感觉可以删除
+# @app.route('/api/analysis/train/train/model/download', methods=['GET'])
+# @token_required
+# def download_model():
+#     model_train_id = request.args.get("model_train_id", "")
+#
+#     if not model_train_id:
+#         return jsonify({"state": 400, "message": "Invalid model_train_id"}), 400
+#
+#     conn = get_db_connection()
+#     if conn is None:
+#         return jsonify({"state": 500, "message": "Database connection failed"}), 500
+#
+#     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+#
+#     try:
+#         # 查询模型数据
+#         query = """
+#         SELECT model_data FROM tb_analysis_model WHERE model_train_id = %s
+#         """
+#         cursor.execute(query, (model_train_id,))
+#         model_result = cursor.fetchone()
+#
+#         if not model_result:
+#             return jsonify({"state": 404, "message": "Model not found"}), 404
+#
+#         return jsonify({"state": 200, "data": {"model_train_data": model_result["model_data"]}}), 200
+#
+#     except psycopg2.Error as e:
+#         print(f"Database error: {e}")
+#         return jsonify({"state": 500, "message": "Failed to fetch model data"}), 500
+#
+#     finally:
+#         cursor.close()
+#         conn.close()
+
+
+#
+
+
+
+#6.22
+# 用户可以自定义修改模型名称
 @app.route('/api/analysis/train/train/model/save', methods=['POST'])
 @token_required
-def save_model():
+def save_model(): # 函数名保持不变
+    """
+    根据 model_train_id 更新 tb_analysis_model_train 表中的 model_train_name。
+    请求体中需要包含 'model_train_id' 和 'model_train_name'。
+    """
     data = request.get_json()
-    if not data or "model_train_id" not in data:
-        return jsonify({"state": 400, "message": "Invalid input data"}), 400
+    if not data:
+        return jsonify({"state": 400, "message": "无效的输入数据：请求体为空"}), 400
 
-    model_train_id = data["model_train_id"]
-    create_user = "system"
+    model_train_id = data.get("model_train_id")
+    new_model_train_name = data.get("model_train_name") # 使用请求中的 model_train_name 作为新名称
+
+    if not model_train_id:
+        return jsonify({"state": 400, "message": "无效的输入数据：'model_train_id' 是必需的"}), 400
+    if not new_model_train_name:
+        return jsonify({"state": 400, "message": "无效的输入数据：'model_train_name' (新的模型名称) 是必需的"}), 400
+
+    create_user = "system" # 或者如果适用，从token中动态获取
     create_time = datetime.datetime.now()
 
     conn = get_db_connection()
     if conn is None:
-        return jsonify({"state": 500, "message": "Database connection failed"}), 500
+        return jsonify({"state": 500, "message": "数据库连接失败"}), 500
 
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     try:
-        # **1. 查询模型信息**
-        cursor.execute("SELECT model_id, model_train_name FROM tb_analysis_model_train WHERE model_train_id = %s",
+        # 1. 检查模型训练记录是否存在
+        cursor.execute("SELECT model_train_id FROM tb_analysis_model_train WHERE model_train_id = %s",
                        (model_train_id,))
-        model_result = cursor.fetchone()
-        if not model_result:
-            return jsonify({"state": 404, "message": "Model training record not found"}), 404
+        existing_record = cursor.fetchone()
+        if not existing_record:
+            return jsonify({"state": 404, "message": f"未找到 ID 为 '{model_train_id}' 的模型训练记录。"}), 404
 
-        model_id = model_result["model_id"]
-        model_name = model_result["model_train_name"]
-
-        # **2. 读取训练后的模型参数**
-        model_dir = "./saved_models"
-        logger.info(f"Model name: {model_name}")  # 打印 model_name
-        logger.info(f"Model directory: {model_dir}")  # 打印 model_dir
-        model_files = [f for f in os.listdir(model_dir) if f.startswith(model_name)]
-        model_files.sort(reverse=True)  # 按时间降序排序
-        logger.info(f"Files in model directory: {os.listdir(model_dir)}")  # 列出目录内容
-        if not model_files:
-            return jsonify({"state": 404, "message": "Trained model file not found"}), 404
-
-        model_path = os.path.join(model_dir, model_files[0])
-        logger.info(f"Model path: {model_path}")  # 打印 model_path
-        model_data = None
-        if model_path.endswith('.pt'):
-            model_data = torch.load(model_path, map_location=torch.device('cpu'))
-        elif model_path.endswith('.joblib'):
-            with open(model_path, "rb") as f:
-                model_data = joblib.load(f)
-
-        if model_data is None:
-            return jsonify({"state": 404, "message": "Trained model file not found"}), 404
-
-        model_data_json = json.dumps(model_data, default=str)  # 确保数据可序列化
-
-        # **3. 插入或更新 `tb_analysis_model` 表**
-        cursor.execute("SELECT model_id FROM tb_analysis_model WHERE model_id = %s", (model_id,))
-        existing_model = cursor.fetchone()
-
-        if existing_model:
-            query_update = """
-            UPDATE tb_analysis_model
-            SET model_train_id = %s, model_name = %s, model_data = %s, create_user = %s, create_time = %s
-            WHERE model_id = %s
-            """
-            cursor.execute(query_update,
-                           (model_train_id, model_name, model_data_json, create_user, create_time, model_id))
-        else:
-            query_insert = """
-            INSERT INTO tb_analysis_model (model_id, model_train_id, model_name, model_data, create_user, create_time)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """
-            cursor.execute(query_insert,
-                           (model_id, model_train_id, model_name, model_data_json, create_user, create_time))
+        # 2. 更新 tb_analysis_model_train 表中的 model_train_name
+        query_update = """
+        UPDATE tb_analysis_model_train
+        SET model_train_name = %s, create_user = %s, create_time = %s
+        WHERE model_train_id = %s
+        """
+        cursor.execute(query_update,
+                       (new_model_train_name, create_user, create_time, model_train_id))
 
         conn.commit()
+        return jsonify({"state": 200, "data": {"success": "true", "message": "模型训练名称更新成功。"}}), 200
         return jsonify({"state": 200, "data": {"success": "true", "message": "Model saved successfully"}}), 200
 
     except psycopg2.Error as e:
@@ -2726,12 +2845,18 @@ def download_model():
         return jsonify({"state": 200, "data": {"model_train_data": model_result["model_data"]}}), 200
 
     except psycopg2.Error as e:
+        # 数据库错误时回滚
+        conn.rollback()
+        print(f"更新模型训练名称时出错: {e}")
+        return jsonify({"state": 500, "message": "由于数据库错误，更新模型训练名称失败。"}), 500
         logger.error(f"Database error: {e}")
         return jsonify({"state": 500, "message": "Failed to fetch model data"}), 500
 
     finally:
-        cursor.close()
-        conn.close()
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
 @app.route('/api/analysis/train/train/param/get', methods=['GET'])
@@ -3236,7 +3361,7 @@ def get_apply_wave_data():
                 })
             except json.JSONDecodeError as e:
                 # 如果 sample_data 不是有效的 JSON 字符串，则跳过或记录错误
-                logger.error(f"样本 {row['apply_sample_id']} 的数据解析失败: {e}")
+                print(f"样本 {row['apply_sample_id']} 的数据解析失败: {e}")
                 continue  # 或者可以返回一个错误信息，取决于业务需求
 
         if not response_data:
@@ -3296,7 +3421,7 @@ def get_apply_models():
 
     except Exception as e:
         # 捕获任何服务器内部错误
-        logger.error(f"获取模型数据失败: {str(e)}")  # 打印错误以便调试
+        print(f"获取模型数据失败: {str(e)}")  # 打印错误以便调试
         return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
     finally:
         if cursor:
@@ -3424,7 +3549,7 @@ def add_apply_sample_to_library():
     except Exception as e:
         if conn:
             conn.rollback()  # 发生异常时回滚数据库操作
-        logger.error(f"添加样本至样本库失败: {str(e)}")  # 打印错误以便调试
+        print(f"添加样本至样本库失败: {str(e)}")  # 打印错误以便调试
         return jsonify({
             "state": 500,
             "data": {

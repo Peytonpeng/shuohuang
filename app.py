@@ -73,6 +73,7 @@ def emit_process_progress(room_id, process_type, data):
             **data
         }
         socketio.emit('process_progress', payload, namespace='/ns_analysis', room=room_id)
+        #socketio.emit('process_completed', payload, namespace='/ns_analysis', room=room_id)
         logger.debug(f"发送{process_type}进度消息到房间 {room_id} (ns /ns_analysis): {data.get('message', '')}")
     except Exception as e:
         logger.error(f"发送{process_type}进度消息失败 (房间 {room_id}): {e}", exc_info=True)
@@ -166,21 +167,16 @@ def emit_round_result(room_id, data):  # 参数名改为 room_id
 def handle_ns_analysis_connect():
     """处理客户端连接到 /ns_analysis namespace"""
     logger.debug(f"客户端 {request.sid} 连接到 /ns_analysis namespace")
-    emit('connected_to_namespace', {
-        'message': '已连接到 /ns_analysis 命名空间。请发送 join_room 事件加入指定房间。',
-        'sid': request.sid,
-        'timestamp': datetime.datetime.now().isoformat()
-    }, room=request.sid)
 
 
 @socketio.on('disconnect', namespace='/ns_analysis')
 def handle_ns_analysis_disconnect():
     """处理客户端从 /ns_analysis namespace 断开连接"""
-    room_to_leave = session.get('room')
+    room_to_leave = session.get('room_id')
     if room_to_leave:
         leave_room(room_to_leave)
         logger.debug(f"客户端 {request.sid} 自动离开房间 {room_to_leave} (从 /ns_analysis namespace 断开)")
-        session.pop('room', None)
+        session.pop('room_id', None)
     else:
         logger.debug(f"客户端 {request.sid} 从 /ns_analysis namespace 断开 (未在 session 中找到房间信息)")
 
@@ -191,7 +187,7 @@ def on_join_ns_analysis_room(data):
     room_to_join = data.get('room_id')
     if not isinstance(room_to_join, str) or not room_to_join:
         logger.warning(f"客户端 {request.sid} 尝试加入无效的房间名: {room_to_join}。数据: {data}")
-        emit('room_join_error', {
+        socketio.emit('room_join_error', {
             'message': '无效的房间名 (room_id) 或未提供。',
             'requested_room': room_to_join,
             'timestamp': datetime.datetime.now().isoformat()
@@ -202,37 +198,37 @@ def on_join_ns_analysis_room(data):
     session['room_id'] = room_to_join
     logger.debug(f"客户端 {request.sid} 加入房间: {room_to_join} (ns /ns_analysis)")
 
-    emit('room_joined', {
-        'message': f'成功加入房间: {room_to_join}',
-        'room_id': room_to_join,
-        'timestamp': datetime.datetime.now().isoformat()
-    }, room=request.sid)
+    # emit('room_joined', {
+    #     'message': f'成功加入房间: {room_to_join}',
+    #     'room_id': room_to_join,
+    #     'timestamp': datetime.datetime.now().isoformat()
+    # }, room=request.sid)
 
 
 @socketio.on('leave_room', namespace='/ns_analysis')
 def on_leave_ns_analysis_room(data):
     """处理客户端主动离开处理房间的请求"""
-    room_to_leave = data.get('room')
+    room_to_leave = data.get('room_id')
     if not isinstance(room_to_leave, str) or not room_to_leave:
         logger.warning(f"客户端 {request.sid} 尝试离开无效的房间名: {room_to_leave}。数据: {data}")
-        emit('room_leave_error', {
-            'message': '无效的房间名 (room) 或未提供。',
-            'requested_room': room_to_leave,
-            'timestamp': datetime.datetime.now().isoformat()
-        }, room=request.sid)
+        # emit('room_leave_error', {
+        #     'message': '无效的房间名 (room) 或未提供。',
+        #     'requested_room': room_to_leave,
+        #     'timestamp': datetime.datetime.now().isoformat()
+        # }, room=request.sid)
         return
 
     leave_room(room_to_leave)
     logger.debug(f"客户端 {request.sid} 主动离开房间: {room_to_leave} (ns /ns_analysis)")
 
-    if session.get('room') == room_to_leave:
-        session.pop('room', None)
+    if session.get('room_id') == room_to_leave:
+        session.pop('room_id', None)
 
-    emit('room_left', {
-        'message': f'已离开房间: {room_to_leave}',
-        'room': room_to_leave,
-        'timestamp': datetime.datetime.now().isoformat()
-    }, room=request.sid)
+    # emit('room_left', {
+    #     'message': f'已离开房间: {room_to_leave}',
+    #     'room': room_to_leave,
+    #     'timestamp': datetime.datetime.now().isoformat()
+    # }, room=request.sid)
 
 
 

@@ -308,6 +308,8 @@ def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_
     start_time = time.time()
     mse, recall, f1, accuracy = None, None, None, None
     cluster_centers_list = None
+    # 初始化轮廓系数
+    silhouette_score_val = None
     current_message = None
 
     X_train, X_test = X_train_df, X_test_df

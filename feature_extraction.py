@@ -4,6 +4,7 @@ from scipy.fftpack import fft
 import pywt
 import emd
 
+
 #峭度指标
 import numpy as np
 from scipy.stats import kurtosis

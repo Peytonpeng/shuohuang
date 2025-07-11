@@ -1,4 +1,6 @@
 import time
+from collections import Counter
+
 import joblib
 import torch
 from flask import Flask, request, jsonify, render_template, session
@@ -2280,15 +2282,16 @@ def start_model_training():
         current_training_instance_id = str(uuid.uuid4())
         param_data_req_json = json.dumps(param_data_req)
 
+
+        # model_train_data不存进数据库了，没有用，浪费资源
         query_insert_train_instance = """
         INSERT INTO tb_analysis_model_train
-        (model_train_id, model_id, model_train_name, param_data, param_auto_perfect, model_train_data, create_user, create_time)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        (model_train_id, model_id, model_train_name, param_data, param_auto_perfect, create_user, create_time)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
         cursor.execute(query_insert_train_instance, (
             current_training_instance_id, model_id_req, actual_model_name,
             param_data_req_json, str(data.get("param_auto_perfect", "")),
-            final_feature_data_json_for_training,
             create_user_req, create_time_req
         ))
 
@@ -2617,132 +2620,7 @@ def stop_model_training():
 
 
 
-# @app.route('/api/analysis/train/train/model/save', methods=['POST'])
-# @token_required
-# def save_model():
-#     data = request.get_json()
-#     if not data or "model_train_id" not in data:
-#         return jsonify({"state": 400, "message": "Invalid input data"}), 400
-#
-#     model_train_id = data["model_train_id"]
-#     create_user = "system"
-#     create_time = datetime.datetime.now()
-#
-#     conn = get_db_connection()
-#     if conn is None:
-#         return jsonify({"state": 500, "message": "Database connection failed"}), 500
-#
-#     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-#
-#     try:
-#         # **1. 查询模型信息**
-#         cursor.execute("SELECT model_id, model_train_name FROM tb_analysis_model_train WHERE model_train_id = %s",
-#                        (model_train_id,))
-#         model_result = cursor.fetchone()
-#         if not model_result:
-#             return jsonify({"state": 404, "message": "Model training record not found"}), 404
-#
-#         model_id = model_result["model_id"]
-#         model_name = model_result["model_train_name"]
-#
-#         # **2. 读取训练后的模型参数**
-#         model_dir = "./saved_models"
-#         print(f"Model name: {model_name}")  # 打印 model_name
-#         print(f"Model directory: {model_dir}")  # 打印 model_dir
-#         model_files = [f for f in os.listdir(model_dir) if f.startswith(model_name)]
-#         model_files.sort(reverse=True)  # 按时间降序排序
-#         print(f"Files in model directory: {os.listdir(model_dir)}")  # 列出目录内容
-#         if not model_files:
-#             return jsonify({"state": 404, "message": "Trained model file not found"}), 404
-#
-#         model_path = os.path.join(model_dir, model_files[0])
-#         print(f"Model path: {model_path}")  # 打印 model_path
-#         model_data = None
-#         if model_path.endswith('.pt'):
-#             model_data = torch.load(model_path, map_location=torch.device('cpu'))
-#         elif model_path.endswith('.joblib'):
-#             with open(model_path, "rb") as f:
-#                 model_data = joblib.load(f)
-#
-#         if model_data is None:
-#             return jsonify({"state": 404, "message": "Trained model file not found"}), 404
-#
-#         model_data_json = json.dumps(model_data, default=str)  # 确保数据可序列化
-#
-#         # **3. 插入或更新 `tb_analysis_model` 表**
-#         cursor.execute("SELECT model_id FROM tb_analysis_model WHERE model_id = %s", (model_id,))
-#         existing_model = cursor.fetchone()
-#
-#         if existing_model:
-#             query_update = """
-#             UPDATE tb_analysis_model
-#             SET model_train_id = %s, model_name = %s, model_data = %s, create_user = %s, create_time = %s
-#             WHERE model_id = %s
-#             """
-#             cursor.execute(query_update,
-#                            (model_train_id, model_name, model_data_json, create_user, create_time, model_id))
-#         else:
-#             query_insert = """
-#             INSERT INTO tb_analysis_model (model_id, model_train_id, model_name, model_data, create_user, create_time)
-#             VALUES (%s, %s, %s, %s, %s, %s)
-#             """
-#             cursor.execute(query_insert,
-#                            (model_id, model_train_id, model_name, model_data_json, create_user, create_time))
-#
-#         conn.commit()
-#         return jsonify({"state": 200, "data": {"success": "true", "message": "Model saved successfully"}}), 200
-#
-#     except psycopg2.Error as e:
-#         print(f"Error saving model: {e}")
-#         return jsonify({"state": 500, "message": "Failed to save model"}), 500
-#
-#     finally:
-#         cursor.close()
-#         conn.close()
 
-#下载模型接口感觉可以删除
-# @app.route('/api/analysis/train/train/model/download', methods=['GET'])
-# @token_required
-# def download_model():
-#     model_train_id = request.args.get("model_train_id", "")
-#
-#     if not model_train_id:
-#         return jsonify({"state": 400, "message": "Invalid model_train_id"}), 400
-#
-#     conn = get_db_connection()
-#     if conn is None:
-#         return jsonify({"state": 500, "message": "Database connection failed"}), 500
-#
-#     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-#
-#     try:
-#         # 查询模型数据
-#         query = """
-#         SELECT model_data FROM tb_analysis_model WHERE model_train_id = %s
-#         """
-#         cursor.execute(query, (model_train_id,))
-#         model_result = cursor.fetchone()
-#
-#         if not model_result:
-#             return jsonify({"state": 404, "message": "Model not found"}), 404
-#
-#         return jsonify({"state": 200, "data": {"model_train_data": model_result["model_data"]}}), 200
-#
-#     except psycopg2.Error as e:
-#         print(f"Database error: {e}")
-#         return jsonify({"state": 500, "message": "Failed to fetch model data"}), 500
-#
-#     finally:
-#         cursor.close()
-#         conn.close()
-
-
-#
-
-
-
-#6.22
-# 用户可以自定义修改模型名称
 @app.route('/api/analysis/train/train/model/save', methods=['POST'])
 @token_required
 def save_model(): # 函数名保持不变
@@ -2801,46 +2679,47 @@ def save_model(): # 函数名保持不变
         conn.close()
 
 
-@app.route('/api/analysis/train/train/model/download', methods=['GET'])
-@token_required
-def download_model():
-    model_train_id = request.args.get("model_train_id", "")
-
-    if not model_train_id:
-        return jsonify({"state": 400, "message": "Invalid model_train_id"}), 400
-
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"state": 500, "message": "Database connection failed"}), 500
-
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-    try:
-        # 查询模型数据
-        query = """
-        SELECT model_data FROM tb_analysis_model WHERE model_train_id = %s
-        """
-        cursor.execute(query, (model_train_id,))
-        model_result = cursor.fetchone()
-
-        if not model_result:
-            return jsonify({"state": 404, "message": "Model not found"}), 404
-
-        return jsonify({"state": 200, "data": {"model_train_data": model_result["model_data"]}}), 200
-
-    except psycopg2.Error as e:
-        # 数据库错误时回滚
-        conn.rollback()
-        print(f"更新模型训练名称时出错: {e}")
-        return jsonify({"state": 500, "message": "由于数据库错误，更新模型训练名称失败。"}), 500
-        logger.error(f"Database error: {e}")
-        return jsonify({"state": 500, "message": "Failed to fetch model data"}), 500
-
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+#ss这个接口可以省略吧，感觉没用
+# @app.route('/api/analysis/train/train/model/download', methods=['GET'])
+# @token_required
+# def download_model():
+#     model_train_id = request.args.get("model_train_id", "")
+#
+#     if not model_train_id:
+#         return jsonify({"state": 400, "message": "Invalid model_train_id"}), 400
+#
+#     conn = get_db_connection()
+#     if conn is None:
+#         return jsonify({"state": 500, "message": "Database connection failed"}), 500
+#
+#     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+#
+#     try:
+#         # 查询模型数据
+#         query = """
+#         SELECT model_data FROM tb_analysis_model WHERE model_train_id = %s
+#         """
+#         cursor.execute(query, (model_train_id,))
+#         model_result = cursor.fetchone()
+#
+#         if not model_result:
+#             return jsonify({"state": 404, "message": "Model not found"}), 404
+#
+#         return jsonify({"state": 200, "data": {"model_train_data": model_result["model_data"]}}), 200
+#
+#     except psycopg2.Error as e:
+#         # 数据库错误时回滚
+#         conn.rollback()
+#         print(f"更新模型训练名称时出错: {e}")
+#         return jsonify({"state": 500, "message": "由于数据库错误，更新模型训练名称失败。"}), 500
+#         logger.error(f"Database error: {e}")
+#         return jsonify({"state": 500, "message": "Failed to fetch model data"}), 500
+#
+#     finally:
+#         if cursor:
+#             cursor.close()
+#         if conn:
+#             conn.close()
 
 
 @app.route('/api/analysis/train/train/param/get', methods=['GET'])
@@ -3052,109 +2931,239 @@ def import_apply_file():
         return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
 
 
+# # 5.12新增AI模型应用接口：
+# # 这个接口不懂什么意思？
+# @app.route('/api/analysis/apply/gather/check', methods=['GET'])
+# @token_required
+# def check_apply_file():
+#     """
+#     在线检查样本数据接口。
+#     根据 file_id 检查文件是否存在于数据库中以及文件是否在服务器上。
+#
+#     参数:
+#       - file_id (str): 文件标识符
+#
+#     返回:
+#       JSON: 包含检查结果的JSON响应
+#     """
+#     conn = None
+#     cursor = None
+#     try:
+#         file_id = request.args.get('file_id')
+#
+#         if not file_id:
+#             return jsonify({
+#                 "state": 400,
+#                 "data": {
+#                     "success": "false",
+#                     "message": "未提供文件标识符"
+#                 }
+#             }), 400
+#
+#         conn = get_db_connection()
+#         if conn is None:
+#             return jsonify({
+#                 "state": 500,
+#                 "data": {
+#                     "success": "false",
+#                     "message": "数据库连接失败"
+#                 }
+#             }), 500
+#
+#         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+#
+#         # 1. 检查文件ID是否存在于数据库中
+#         sql_query = "SELECT file_path FROM tb_analysis_apply_file WHERE file_id = %s"
+#         cursor.execute(sql_query, (file_id,))
+#         result = cursor.fetchone()
+#
+#         if not result:
+#             return jsonify({
+#                 "state": 404,
+#                 "data": {
+#                     "success": "false",
+#                     "message": f"文件标识符 '{file_id}' 不存在于数据库中。"
+#                 }
+#             }), 404  # 根据图片要求，返回 404 表示失败
+#
+#         file_path = result['file_path']
+#
+#         # 2. 检查文件是否存在于服务器文件系统中
+#         if not os.path.exists(file_path):
+#             return jsonify({
+#                 "state": 404,
+#                 "data": {
+#                     "success": "false",
+#                     "message": f"文件 '{file_path}' 在服务器上不存在或已被移动。"
+#                 }
+#             }), 404  # 根据图片要求，返回 404 表示失败
+#
+#         # 3. (可选) 检查文件是否为空或损坏，这里只进行简单的大小检查
+#         if os.path.getsize(file_path) == 0:
+#             return jsonify({
+#                 "state": 400,  # 文件内容问题，可以返回 400 Bad Request
+#                 "data": {
+#                     "success": "false",
+#                     "message": f"文件 '{file_path}' 为空，无有效数据。"
+#                 }
+#             }), 400
+#
+#         # 所有检查通过
+#         return jsonify({
+#             "state": 200,
+#             "data": {
+#                 "success": "true",
+#                 "message": "文件数据检查通过，文件有效且可访问。"
+#             }
+#         }), 200
+#
+#     except Exception as e:
+#         # 捕获其他任何服务器内部错误
+#         return jsonify({
+#             "state": 500,
+#             "data": {
+#                 "success": "false",
+#                 "message": f"服务器内部错误: {str(e)}"
+#             }
+#         }), 500
+#     finally:
+#         if cursor:
+#             cursor.close()
+#         if conn:
+#             conn.close()
+
+
 # 5.12新增AI模型应用接口：
-# 这个接口不懂什么意思？
-@app.route('/api/analysis/apply/gather/check', methods=['GET'])
-@token_required
-def check_apply_file():
-    """
-    在线检查样本数据接口。
-    根据 file_id 检查文件是否存在于数据库中以及文件是否在服务器上。
-
-    参数:
-      - file_id (str): 文件标识符
-
-    返回:
-      JSON: 包含检查结果的JSON响应
-    """
-    conn = None
-    cursor = None
-    try:
-        file_id = request.args.get('file_id')
-
-        if not file_id:
-            return jsonify({
-                "state": 400,
-                "data": {
-                    "success": "false",
-                    "message": "未提供文件标识符"
-                }
-            }), 400
-
-        conn = get_db_connection()
-        if conn is None:
-            return jsonify({
-                "state": 500,
-                "data": {
-                    "success": "false",
-                    "message": "数据库连接失败"
-                }
-            }), 500
-
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-        # 1. 检查文件ID是否存在于数据库中
-        sql_query = "SELECT file_path FROM tb_analysis_apply_file WHERE file_id = %s"
-        cursor.execute(sql_query, (file_id,))
-        result = cursor.fetchone()
-
-        if not result:
-            return jsonify({
-                "state": 404,
-                "data": {
-                    "success": "false",
-                    "message": f"文件标识符 '{file_id}' 不存在于数据库中。"
-                }
-            }), 404  # 根据图片要求，返回 404 表示失败
-
-        file_path = result['file_path']
-
-        # 2. 检查文件是否存在于服务器文件系统中
-        if not os.path.exists(file_path):
-            return jsonify({
-                "state": 404,
-                "data": {
-                    "success": "false",
-                    "message": f"文件 '{file_path}' 在服务器上不存在或已被移动。"
-                }
-            }), 404  # 根据图片要求，返回 404 表示失败
-
-        # 3. (可选) 检查文件是否为空或损坏，这里只进行简单的大小检查
-        if os.path.getsize(file_path) == 0:
-            return jsonify({
-                "state": 400,  # 文件内容问题，可以返回 400 Bad Request
-                "data": {
-                    "success": "false",
-                    "message": f"文件 '{file_path}' 为空，无有效数据。"
-                }
-            }), 400
-
-        # 所有检查通过
-        return jsonify({
-            "state": 200,
-            "data": {
-                "success": "true",
-                "message": "文件数据检查通过，文件有效且可访问。"
-            }
-        }), 200
-
-    except Exception as e:
-        # 捕获其他任何服务器内部错误
-        return jsonify({
-            "state": 500,
-            "data": {
-                "success": "false",
-                "message": f"服务器内部错误: {str(e)}"
-            }
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+# @app.route('/api/analysis/apply/gather/sample', methods=['GET'])
+# @token_required
+# def get_apply_sample_data():
+#     """
+#     根据文件标识获取样本数据列表 (用于分析应用模块)
+#     - 参数：
+#       - file_id (str): 文件标识符
+#     - 响应：
+#       - 成功返回样本标识符和名称列表
+#       - 失败返回错误信息
+#     """
+#     file_id = request.args.get('file_id')
+#     create_user = request.args.get('create_user', 'admin')  # 可以从请求头或session获取实际用户
+#
+#     if not file_id:
+#         return jsonify({"state": 400, "message": "未提供文件标识符"}), 400
+#
+#     conn = None
+#     cursor = None
+#     try:
+#         conn = get_db_connection()
+#         if conn is None:
+#             return jsonify({"state": 500, "message": "数据库连接失败"}), 500
+#
+#         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+#
+#         # 1. 查询是否已存在该 file_id 的样本数据 (tb_analysis_apply_sample)
+#         cursor.execute("SELECT apply_sample_id, sample_name FROM tb_analysis_apply_sample WHERE file_id = %s",
+#                        (file_id,))
+#         existing_samples = cursor.fetchall()
+#
+#         if existing_samples:
+#             # 如果已存在，直接返回现有数据
+#             data_to_return = [{"sample_id": sample['apply_sample_id'], "sample_name": sample['sample_name']}
+#                               for sample in existing_samples]
+#             return jsonify({
+#                 "state": 200,
+#                 "data": data_to_return,
+#                 "message": f"文件标识符 '{file_id}' 的样本数据已存在，已返回现有数据。"
+#             }), 200
+#         else:
+#             # 2. 查询文件路径 (tb_analysis_apply_file)
+#             cursor.execute("SELECT file_path FROM tb_analysis_apply_file WHERE file_id = %s", (file_id,))
+#             result = cursor.fetchone()
+#
+#             if not result:
+#                 return jsonify({"state": 404, "message": "未找到对应的文件标识符"}), 404
+#
+#             file_path = result['file_path']
+#             if not os.path.exists(file_path):
+#                 return jsonify({"state": 404, "message": "文件在服务器上不存在"}), 404
+#
+#             # 3. 读取文件
+#             df = None
+#             try:
+#                 # 根据文件扩展名选择合适的读取函数
+#                 file_ext = os.path.splitext(file_path)[1].lower()
+#                 if file_ext in ['.csv', '.txt']:
+#                     df = pd.read_csv(file_path)
+#                 elif file_ext in ['.xls', '.xlsx']:
+#                     df = pd.read_excel(file_path)
+#                 # TODO: 对于 .mat 文件，需要使用 scipy.io.loadmat
+#                 # TODO: 对于纯 .txt 文件（非CSV格式），可能需要更复杂的解析逻辑
+#                 else:
+#                     return jsonify({"state": 400, "message": f"不支持的文件类型: {file_ext}"}), 400
+#
+#             except FileNotFoundError:
+#                 return jsonify({"state": 404, "message": "文件未找到"}), 404
+#             except (pd.errors.ParserError, pd.errors.EmptyDataError, Exception) as e:
+#                 # 捕获Pandas解析错误，例如CSV格式不正确或文件为空
+#                 return jsonify({"state": 400, "message": f"文件解析失败，请检查文件格式: {str(e)}"}), 400
+#
+#             if df.empty:
+#                 return jsonify({"state": 400, "message": "文件内容为空，没有可用的样本数据"}), 400
+#
+#             # 4. 遍历列，生成样本数据并准备插入
+#             sample_list_to_insert = []
+#             data_to_return = []
+#             file_uuid_prefix = str(uuid.uuid4())  # 为当前文件解析批次生成一个 UUID 前缀
+#
+#             for i, col_name in enumerate(df.columns):
+#                 # 生成唯一的 apply_sample_id
+#                 apply_sample_id = f"{file_uuid_prefix}_{i + 1}"
+#
+#                 # 获取列数据并转换为 JSON 字符串
+#                 sample_data_list = df[col_name].tolist()
+#                 sample_data_json = json.dumps(sample_data_list)
+#
+#                 data_to_return.append({
+#                     "sample_id": apply_sample_id,
+#                     "sample_name": col_name
+#                 })
+#
+#                 sample_list_to_insert.append((
+#                     apply_sample_id, file_id, col_name, sample_data_json, '1', create_user, datetime.datetime.now()
+#                 ))
+#
+#             # 5. 批量插入数据到 tb_analysis_apply_check_sample
+#             insert_query = """
+#             INSERT INTO tb_analysis_apply_sample (
+#                 apply_sample_id, file_id, sample_name, sample_data, sample_state, create_user, create_time
+#             ) VALUES (%s, %s, %s, %s, %s, %s, %s);
+#             """
+#             cursor.executemany(insert_query, sample_list_to_insert)
+#             conn.commit()
+#
+#             return jsonify({
+#                 "state": 200,
+#                 "data": data_to_return
+#             }), 200
+#
+#     except psycopg2.Error as e:
+#         if conn:
+#             conn.rollback()  # 数据库操作失败时回滚
+#         return jsonify({"state": 500, "message": f"PostgreSQL 操作失败: {str(e)}"}), 500
+#     except Exception as e:
+#         if conn:
+#             conn.rollback()  # 确保在其他异常时也回滚
+#         return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
+#     finally:
+#         if cursor:
+#             cursor.close()
+#         if conn:
+#             conn.close()
 
 
 # 5.12新增AI模型应用接口：
+
+
+import math
 @app.route('/api/analysis/apply/gather/sample', methods=['GET'])
 @token_required
 def get_apply_sample_data():
@@ -3190,21 +3199,25 @@ def get_apply_sample_data():
             # 如果已存在，直接返回现有数据
             data_to_return = [{"sample_id": sample['apply_sample_id'], "sample_name": sample['sample_name']}
                               for sample in existing_samples]
+            print(f"DEBUG: File ID '{file_id}' sample data already exists, returning existing data.")
             return jsonify({
                 "state": 200,
                 "data": data_to_return,
                 "message": f"文件标识符 '{file_id}' 的样本数据已存在，已返回现有数据。"
             }), 200
         else:
+            print(f"DEBUG: No existing sample data for file ID '{file_id}', proceeding to process file.")
             # 2. 查询文件路径 (tb_analysis_apply_file)
             cursor.execute("SELECT file_path FROM tb_analysis_apply_file WHERE file_id = %s", (file_id,))
             result = cursor.fetchone()
 
             if not result:
+                print(f"ERROR: File ID '{file_id}' not found in tb_analysis_apply_file.")
                 return jsonify({"state": 404, "message": "未找到对应的文件标识符"}), 404
 
             file_path = result['file_path']
             if not os.path.exists(file_path):
+                print(f"ERROR: File does not exist on server: {file_path}")
                 return jsonify({"state": 404, "message": "文件在服务器上不存在"}), 404
 
             # 3. 读取文件
@@ -3219,15 +3232,32 @@ def get_apply_sample_data():
                 # TODO: 对于 .mat 文件，需要使用 scipy.io.loadmat
                 # TODO: 对于纯 .txt 文件（非CSV格式），可能需要更复杂的解析逻辑
                 else:
+                    print(f"ERROR: Unsupported file type: {file_ext} for file {file_path}")
                     return jsonify({"state": 400, "message": f"不支持的文件类型: {file_ext}"}), 400
 
+                # --- DEBUG POINT 1: 刚读取文件后检查 DataFrame 的状态 ---
+                print("\n--- DEBUG POINT 1: After pd.read_csv/excel ---")
+                print(f"File Path: {file_path}")
+                print("DataFrame Head:")
+                print(df.head().to_string()) # 使用 .to_string() 避免截断
+                print("\nDataFrame dtypes (IMPORTANT!):")
+                print(df.dtypes.to_string())
+                print("\nDataFrame info (check non-null counts):")
+                df.info(verbose=True, show_counts=True) # show_counts=True 显示非空值数量
+                print("\nNaN count per column (VERY IMPORTANT!):")
+                print(df.isnull().sum().to_string())
+                print("--- END DEBUG POINT 1 ---")
+
             except FileNotFoundError:
+                print(f"ERROR: File not found during read attempt: {file_path}")
                 return jsonify({"state": 404, "message": "文件未找到"}), 404
             except (pd.errors.ParserError, pd.errors.EmptyDataError, Exception) as e:
+                print(f"ERROR: File parsing failed for {file_path}: {str(e)}")
                 # 捕获Pandas解析错误，例如CSV格式不正确或文件为空
                 return jsonify({"state": 400, "message": f"文件解析失败，请检查文件格式: {str(e)}"}), 400
 
             if df.empty:
+                print(f"WARNING: File content is empty for {file_path}.")
                 return jsonify({"state": 400, "message": "文件内容为空，没有可用的样本数据"}), 400
 
             # 4. 遍历列，生成样本数据并准备插入
@@ -3239,9 +3269,59 @@ def get_apply_sample_data():
                 # 生成唯一的 apply_sample_id
                 apply_sample_id = f"{file_uuid_prefix}_{i + 1}"
 
-                # 获取列数据并转换为 JSON 字符串
-                sample_data_list = df[col_name].tolist()
-                sample_data_json = json.dumps(sample_data_list)
+                # --- DEBUG POINT 2: 获取 tolist() 之前的 Series 状态 ---
+                current_series = df[col_name]
+                print(f"\n--- DEBUG POINT 2: Column '{col_name}' (ID: {apply_sample_id}) before .tolist() ---")
+                print(f"Series dtype: {current_series.dtype}")
+                if current_series.isnull().any():
+                    print(f"WARNING: Series contains NaN values (count: {current_series.isnull().sum()})")
+                    print(f"Indices of NaNs: {current_series[current_series.isnull()].index.tolist()}")
+                    # 打印 NaN 周围的值，以便您能检查原始文件对应位置
+                    nan_indices = current_series[current_series.isnull()].index
+                    for idx in nan_indices:
+                        start_idx = max(0, idx - 5)
+                        end_idx = min(len(current_series), idx + 6)
+                        print(f"  Values around NaN at index {idx}: {current_series.iloc[start_idx:end_idx].tolist()}")
+                else:
+                    print("Series contains NO NaN values at this stage.")
+                print("--- END DEBUG POINT 2 ---")
+
+
+                sample_data_list = current_series.tolist() # <-- 关键转换点
+
+                # --- DEBUG POINT 3: tolist() 之后，json.dumps() 之前 ---
+                print(f"\n--- DEBUG POINT 3: Column '{col_name}' (ID: {apply_sample_id}) after .tolist() ---")
+                print(f"List length: {len(sample_data_list)}")
+                has_none = any(x is None for x in sample_data_list)
+                has_float_nan = any(isinstance(x, float) and math.isnan(x) for x in sample_data_list)
+                print(f"List contains Python 'None': {has_none}")
+                print(f"List contains Python 'float('nan')': {has_float_nan}")
+                if has_none or has_float_nan:
+                    print("WARNING: The list now contains None or float('nan')!")
+                    # 打印 problematic values
+                    problem_elements = [(j, val) for j, val in enumerate(sample_data_list) if val is None or (isinstance(val, float) and math.isnan(val))]
+                    for j, val in problem_elements[:10]: # 只打印前10个问题元素
+                        print(f"  Problematic value at index {j}: {val}. Type: {type(val)}")
+                        print(f"  Values around index {j}: {sample_data_list[max(0, j-5):min(len(sample_data_list), j+6)]}")
+                else:
+                    print("List contains NO None or float('nan') values at this stage.")
+                print("--- END DEBUG POINT 3 ---")
+
+                sample_data_json = json.dumps(sample_data_list) # <-- 另一个关键转换点
+
+                # --- DEBUG POINT 4: json.dumps() 之后，入库之前 ---
+                print(f"\n--- DEBUG POINT 4: Column '{col_name}' (ID: {apply_sample_id}) after json.dumps() ---")
+                has_json_null = "null" in sample_data_json
+                print(f"JSON string contains 'null' literal: {has_json_null}")
+                if has_json_null:
+                    print("WARNING: The JSON string now contains 'null'!")
+                    # 打印 JSON 字符串的片段
+                    print(f"Sample JSON snippet (first 500 chars): {sample_data_json[:500]}...")
+                else:
+                    print("JSON string contains NO 'null' literal at this stage.")
+                print("--------------------------------------------------")
+                # --- END DEBUG POINT 4 ---
+
 
                 data_to_return.append({
                     "sample_id": apply_sample_id,
@@ -3252,7 +3332,7 @@ def get_apply_sample_data():
                     apply_sample_id, file_id, col_name, sample_data_json, '1', create_user, datetime.datetime.now()
                 ))
 
-            # 5. 批量插入数据到 tb_analysis_apply_sample
+            # 5. 批量插入数据到 tb_analysis_apply_sample (注意这里已经更正为 tb_analysis_apply_sample)
             insert_query = """
             INSERT INTO tb_analysis_apply_sample (
                 apply_sample_id, file_id, sample_name, sample_data, sample_state, create_user, create_time
@@ -3260,6 +3340,7 @@ def get_apply_sample_data():
             """
             cursor.executemany(insert_query, sample_list_to_insert)
             conn.commit()
+            print(f"DEBUG: Successfully inserted {len(sample_list_to_insert)} samples into tb_analysis_apply_sample for file ID '{file_id}'.")
 
             return jsonify({
                 "state": 200,
@@ -3269,19 +3350,27 @@ def get_apply_sample_data():
     except psycopg2.Error as e:
         if conn:
             conn.rollback()  # 数据库操作失败时回滚
+        print(f"ERROR: PostgreSQL operation failed: {str(e)}")
         return jsonify({"state": 500, "message": f"PostgreSQL 操作失败: {str(e)}"}), 500
     except Exception as e:
         if conn:
             conn.rollback()  # 确保在其他异常时也回滚
+        print(f"FATAL ERROR: Server internal error: {str(e)}")
         return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
+        print("DEBUG: Database connection closed.")
 
 
-# 5.12新增AI模型应用接口：
+
+
+
+
+
+
 @app.route('/api/analysis/apply/gather/wave', methods=['GET'])
 @token_required
 def get_apply_wave_data():
@@ -3370,15 +3459,15 @@ def get_apply_wave_data():
             conn.close()
 
 
-# 5.12新增AI模型应用接口：
+# 7.2修改接口，返回模型训练名称、model_train_id、模型构件路径：
 @app.route('/api/analysis/apply/check/model', methods=['GET'])
 @token_required
 def get_apply_models():
     """
-    获取模型数据列表 (用于分析应用模块的模型选择)
+    获取模型训练数据列表 (用于分析应用模块的模型选择)
     - 参数：无
     - 响应：
-      - 成功返回模型标识、名称、模型数据列表
+      - 成功返回模型训练名称、model_train_id、模型构件路径
       - 失败返回错误信息 (例如 404 表示未找到任何模型)
     """
     conn = None
@@ -3391,21 +3480,29 @@ def get_apply_models():
         # 使用 DictCursor 使得查询结果可以通过字段名访问
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # 查询 tb_analysis_model 表，获取 model_id, model_name, model_data
-        cursor.execute("SELECT model_id, model_name, model_data FROM tb_analysis_model")
+        # 直接查询 tb_analysis_model_train 表，获取 model_train_name, model_id, model_artifact_path
+        sql_query = """
+            SELECT
+                model_train_name,
+                model_train_id,
+                model_artifact_path
+            FROM
+                tb_analysis_model_train
+        """
+        cursor.execute(sql_query)
         models = cursor.fetchall()  # 获取所有查询结果
 
         if not models:
-            # 根据图片要求，如果未找到任何模型，返回 state 404
-            return jsonify({"state": 404, "data": [], "message": "未找到任何模型数据"}), 404
+            # 如果未找到任何模型训练数据，返回 state 404
+            return jsonify({"state": 404, "data": [], "message": "未找到任何模型训练数据"}), 404
+
 
         # Flask 的 jsonify 通常可以直接处理 psycopg2.extras.DictRow 对象列表
-        # 如果遇到问题，可以手动转换为列表字典: [dict(model) for model in models]
         return jsonify({"state": 200, "data": models}), 200
 
     except Exception as e:
         # 捕获任何服务器内部错误
-        print(f"获取模型数据失败: {str(e)}")  # 打印错误以便调试
+        print(f"获取模型训练数据失败: {str(e)}")  # 打印错误以便调试
         return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
     finally:
         if cursor:
@@ -3414,7 +3511,380 @@ def get_apply_models():
             conn.close()
 
 
-# /api/analysis/apply/check/model：这个逻辑据复杂，后面再说
+#TODO：这周任务,目前问题没有处理数据结构
+from model_function import GenericDNN
+from model_function import create_windows_1d,create_windows_wavelet
+
+
+@app.route('/api/analysis/apply/check/start', methods=['POST'])
+# @token_required
+def start_analysis():
+    """
+    接收模型和样本数据，执行完整的分析和预测流程。
+    """
+    # --- 常量定义 ---
+    METHOD_EMD = "经验模态分解"
+    METHOD_WAVELET = "小波变换"
+    METHOD_FFT = "傅里叶变换"
+    METHOD_KURTOSIS = "峭度指标"
+    METHOD_HISTOGRAM = "直方图特征"
+    METHOD_WVD = "Wigner-Ville分布"
+
+    conn = None
+    cursor = None
+    try:
+        # --- 1. 获取并验证请求数据 ---
+        data = request.get_json()
+        if not data:
+            return jsonify({"state": 400, "message": "错误：请求体中没有JSON数据"}), 400
+
+        model_train_id = data.get('model_train_id')
+        model_artifact_path_prefix = data.get('model_artifact_path')
+        model_train_name = data.get('model_train_name')
+        apply_sample_ids = data.get('apply_sample_ids')
+
+        if not all([model_train_id, model_artifact_path_prefix, model_train_name, apply_sample_ids is not None]):
+            return jsonify({"state": 400,
+                            "message": "错误：请求体中缺少必需字段 (model_train_id, model_artifact_path, model_train_name, apply_sample_ids)"}), 400
+
+        if not isinstance(apply_sample_ids, list) or not apply_sample_ids:
+            return jsonify({"state": 400, "message": "错误：'apply_sample_ids'必须是一个非空列表"}), 400
+
+        # --- 2. 建立数据库连接 ---
+        # 假设 get_db_connection() 是您项目中已定义的函数
+        conn = get_db_connection()
+        if conn is None:
+            return jsonify({"state": 500, "message": "数据库连接失败"}), 500
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # --- 3. 从数据库获取输入数据 ---
+        input_data_map = {}
+        query = "SELECT apply_sample_id, sample_data FROM tb_analysis_apply_sample WHERE apply_sample_id = ANY(%s)"
+        cursor.execute(query, (apply_sample_ids,))
+        rows = cursor.fetchall()
+        if not rows:
+            return jsonify({"state": 404, "message": f"未找到ID为 {apply_sample_ids} 的样本数据"}), 404
+
+        for row in rows:
+            sample_id = row['apply_sample_id']
+            raw_sample_data = row['sample_data']
+
+            if raw_sample_data is None:
+                print(f"警告: 样本ID {sample_id} 的原始数据为 NULL，跳过。")
+                continue
+
+            try:
+                if isinstance(raw_sample_data, str):
+                    parsed_list = json.loads(raw_sample_data)
+                elif isinstance(raw_sample_data, (list, dict)):
+                    parsed_list = raw_sample_data
+                else:
+                    print(f"错误: 样本ID {sample_id} 的数据类型 {type(raw_sample_data)} 不支持解析。跳过。")
+                    continue
+
+                if isinstance(parsed_list, list) and len(parsed_list) > 0:
+                    input_data_map[sample_id] = parsed_list
+                else:
+                    print(
+                        f"警告: 样本ID {sample_id} 的数据解析后不是非空列表。实际类型: {type(parsed_list)}, 值: {parsed_list}. 跳过。")
+
+            except (json.JSONDecodeError, TypeError) as e:
+                print(f"错误: 样本ID {sample_id} 的数据解析失败: {e}. 原始数据: {raw_sample_data}. 跳过。")
+                continue
+
+        if not input_data_map:
+            return jsonify({"state": 404, "message": "所有样本数据缺失或解析失败，无数据可分析。"}), 404
+
+        # --- 4. 从数据库获取分析流程配置 ---
+        cursor.execute("""
+            SELECT tats.from_sample_id
+            FROM tb_analysis_model_train_sample AS tats
+            WHERE tats.model_train_id = %s LIMIT 1
+        """, (model_train_id,))
+        train_sample_row = cursor.fetchone()
+        if not train_sample_row:
+            return jsonify({"state": 404, "message": f"找不到模型训练ID {model_train_id} 对应的训练样本记录"}), 404
+        from_sample_id = train_sample_row['from_sample_id']
+
+        cursor.execute(
+            "SELECT preprocess_method FROM tb_analysis_sample_preprocess WHERE preprocess_sample_id = %s LIMIT 1",
+            (from_sample_id,))
+        preprocess_row = cursor.fetchone()
+        preprocess_methods = []
+        if preprocess_row and preprocess_row['preprocess_method']:
+            try:
+                methods_json = preprocess_row['preprocess_method']
+                preprocess_methods = json.loads(methods_json) if isinstance(methods_json, str) else methods_json
+            except json.JSONDecodeError:
+                preprocess_methods = []
+            if not isinstance(preprocess_methods, list):
+                preprocess_methods = []
+
+        cursor.execute(
+            "SELECT feature_extract, feature_extract_param FROM tb_analysis_sample_feature WHERE from_sample_id = %s LIMIT 1",
+            (from_sample_id,))
+        feature_row = cursor.fetchone()
+        feature_extract_method = None
+        feature_extract_params = {}
+        if feature_row:
+            feature_extract_full = feature_row['feature_extract']
+            feature_extract_method = feature_extract_full.rsplit('_', 1)[
+                -1] if '_' in feature_extract_full else feature_extract_full
+            if feature_row['feature_extract_param']:
+                try:
+                    params_json = feature_row['feature_extract_param']
+                    feature_extract_params = json.loads(params_json) if isinstance(params_json, str) else params_json
+                    if not isinstance(feature_extract_params, dict):
+                        feature_extract_params = {}
+                except json.JSONDecodeError:
+                    feature_extract_params = {}
+
+        # --- 硬编码 DNN 模型参数 (请根据您的训练代码调整) ---
+        dnn_num_classes_hardcoded = len(apply_sample_ids)
+        dnn_hidden_dims_hardcoded = [128, 64]
+        dnn_dropout_rate_hardcoded = 0.1
+
+        # --- 5. 定义方法到函数的映射 ---
+        # 假设 Preprocessor 和 feature_extraction 等类/模块在您的项目中已定义
+        preprocess_map = {
+            '异常缺失处理': Preprocessor.apply_method,
+            '高斯滤波': Preprocessor.apply_method,
+            '均值滤波': Preprocessor.apply_method,
+            '最大最小规范化': Preprocessor.apply_method,
+            'Z-score标准化': Preprocessor.apply_method,
+            '主成分分析': Preprocessor.apply_method,
+            '线性判别': Preprocessor.apply_method
+        }
+        feature_map = {
+            METHOD_KURTOSIS: feature_extraction.kurtosis_index,
+            METHOD_HISTOGRAM: feature_extraction.histogram_feature,
+            METHOD_FFT: feature_extraction.fourier_transform,
+            METHOD_WAVELET: feature_extraction.wavelet_transform,
+            METHOD_EMD: feature_extraction.empirical_mode_decomposition,
+            METHOD_WVD: feature_extraction.wigner_ville_distribution,
+        }
+
+        # --- 6. 确定窗口参数 (强制设定) ---
+        window_size = 512
+        step_size = 512
+        is_overlapping = (step_size < window_size)
+
+        # --- 7. 对每个输入样本执行处理流程 ---
+        all_final_features_for_model = []
+        window_to_sample_id_map = []
+
+        for sample_id in apply_sample_ids:
+            if sample_id not in input_data_map:
+                print(f"警告: 样本ID {sample_id} 数据缺失或解析失败，跳过分析。")
+                continue
+
+            # 7.1. 预处理
+            current_data_np = np.array(input_data_map[sample_id], dtype=np.float32).flatten()
+            if current_data_np.size == 0:
+                continue
+
+            processed_data = current_data_np.copy()
+            for method_spec in preprocess_methods:
+                method_name = method_spec['method_name'] if isinstance(method_spec, dict) else method_spec
+                method_params = method_spec.get('params', {}) if isinstance(method_spec, dict) else {}
+                if method_name in preprocess_map:
+                    try:
+                        processed_data = preprocess_map[method_name](processed_data, method_name=method_name,
+                                                                     **method_params)
+                        processed_data = np.array(processed_data, dtype=np.float32)
+                    except Exception as e:
+                        print(f"错误: 样本ID {sample_id} 在预处理 '{method_name}' 时失败: {e}")
+                        processed_data = np.array([])
+                        break
+            if processed_data.size == 0: continue
+
+            # --- 7.2. 应用特征提取 ---
+            extracted_features = None
+
+            if feature_extract_method in feature_map:
+                try:
+                    # 调用特征提取方法
+                    extracted_features = feature_map[feature_extract_method](processed_data)
+
+                    # 类型检查与转换
+                    if not isinstance(extracted_features, np.ndarray):
+                        print(
+                            f"DEBUG: 特征提取方法 '{feature_extract_method}' 返回类型为 {type(extracted_features)}，正在转换为 np.ndarray")
+                        extracted_features = np.array(extracted_features, dtype=np.float32)
+
+                    # 检查提取结果是否为空
+                    if extracted_features.size == 0:
+                        print(f"警告: 样本ID {sample_id} 在特征提取 '{feature_extract_method}' 后结果为空，跳过。")
+                        continue
+
+                except Exception as e:
+                    print(f"错误: 样本ID {sample_id} 在特征提取 '{feature_extract_method}' 时失败: {e}")
+                    import traceback
+                    print(traceback.format_exc())
+                    continue
+            else:
+                print(f"错误：未找到或未定义特征提取方法 '{feature_extract_method}'。跳过样本ID {sample_id}。")
+                continue
+
+            print(f"DEBUG: 样本ID {sample_id} (特征提取后: shape={extracted_features.shape})")
+
+            # 7.3. 窗口化/形状调整
+            final_features_for_sample = np.array([])
+            if feature_extract_method == METHOD_EMD:
+                if extracted_features.ndim == 2 and extracted_features.shape[1] > 0:
+                    processed_1d_data = extracted_features[:, 0]
+                    if processed_1d_data.size >= window_size:
+                        windows, _ = create_windows_1d(processed_1d_data, 0, window_size, step_size, is_overlapping)
+                        final_features_for_sample = windows
+            elif feature_extract_method == METHOD_WAVELET:
+                if extracted_features.ndim == 2:
+                    data_to_window = extracted_features.T
+                    if data_to_window.shape[1] >= window_size:
+                        windows, _ = create_windows_wavelet(data_to_window, 0, window_size, step_size, is_overlapping)
+                        final_features_for_sample = windows
+            elif feature_extract_method == METHOD_FFT:
+                processed_1d_data = extracted_features.flatten()
+                if processed_1d_data.size >= window_size:
+                    windows, _ = create_windows_1d(processed_1d_data, 0, window_size, step_size, is_overlapping)
+                    final_features_for_sample = windows
+            elif feature_extract_method in [METHOD_KURTOSIS, METHOD_HISTOGRAM, METHOD_WVD]:
+                final_features_for_sample = extracted_features.reshape(1, -1)
+            else:  # 其他未知方法
+                final_features_for_sample = extracted_features.flatten().reshape(1, -1)
+
+            if final_features_for_sample.size > 0:
+                all_final_features_for_model.extend(final_features_for_sample)
+                window_to_sample_id_map.extend([sample_id] * len(final_features_for_sample))
+
+        if not all_final_features_for_model:
+            return jsonify({"state": 400, "message": "所有样本都未能生成有效的特征向量用于预测。"}), 400
+
+        # --- 8. 准备模型输入 ---
+        X_all_samples = np.array(all_final_features_for_model, dtype=np.float32)
+        if X_all_samples.ndim == 1:
+            X_all_samples = X_all_samples.reshape(-1, 1)
+
+        current_data_processed_dim = X_all_samples.shape[1]
+        print(f"DEBUG: Processed data feature dimension for model input: {current_data_processed_dim}")
+
+        # --- 9. 加载模型和Scaler ---
+        model_name_base = os.path.basename(model_artifact_path_prefix).split('_')[0]
+        is_dnn = (model_name_base == '深度神经网络')
+        model_path = model_artifact_path_prefix + ('.pth' if is_dnn else '.joblib')
+        scaler_path = model_artifact_path_prefix + '_scaler.joblib'
+
+        if not os.path.exists(model_path):
+            return jsonify({"state": 404, "message": f"在路径 {model_path} 未找到模型文件"}), 404
+
+        try:
+            if is_dnn:
+                # 根据训练逻辑设定DNN的input_dim
+                if feature_extract_method in [METHOD_EMD, METHOD_FFT]:
+                    dnn_model_input_dim = window_size
+                else:
+                    dnn_model_input_dim = current_data_processed_dim
+
+                print(
+                    f"DEBUG: Initializing GenericDNN with input_dim={dnn_model_input_dim}, num_classes={dnn_num_classes_hardcoded}")
+                model = GenericDNN(
+                    input_dim=int(dnn_model_input_dim),
+                    num_classes=int(dnn_num_classes_hardcoded),
+                    hidden_dims=dnn_hidden_dims_hardcoded,
+                    dropout_rate=dnn_dropout_rate_hardcoded
+                )
+                model.load_state_dict(torch.load(model_path, map_location='cpu'))
+                model.eval()
+            else:
+                model = joblib.load(model_path)
+
+            scaler = None
+            if os.path.exists(scaler_path):
+                scaler = joblib.load(scaler_path)
+                print(f"成功加载Scaler: {scaler_path}")
+        except Exception as e:
+            return jsonify({"state": 500, "message": f"加载模型或Scaler失败: {e}"}), 500
+
+        # --- 10. 批量预测 ---
+        X_scaled = scaler.transform(X_all_samples) if scaler else X_all_samples
+
+        if is_dnn:
+            X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
+            with torch.no_grad():
+                y_pred_raw = model(X_tensor)
+                if dnn_num_classes_hardcoded > 1:
+                    y_pred_raw = torch.softmax(y_pred_raw, dim=1)
+                raw_predictions = y_pred_raw.cpu().numpy()
+        else:
+            if hasattr(model, 'predict_proba'):
+                raw_predictions = model.predict_proba(X_scaled)
+            else:
+                raw_predictions = model.predict(X_scaled)
+
+        # --- 11. 聚合预测结果 ---
+        final_predictions = []
+        predictions_by_id = {}
+        for i, sample_id in enumerate(window_to_sample_id_map):
+            predictions_by_id.setdefault(sample_id, []).append(raw_predictions[i])
+
+        is_regression = model_name_base in ['线性回归', '随机森林回归', '支持向量机回归'] or (
+                    is_dnn and dnn_num_classes_hardcoded == 1)
+
+        for sample_id, preds in predictions_by_id.items():
+            preds_array = np.array(preds)
+            result = {"sample_id": str(sample_id)}
+
+            if model_name_base == 'K-均值聚类':
+                # .item() to convert numpy int to native python int
+                result["cluster_id"] = Counter(preds_array.flatten()).most_common(1)[0][0].item()
+            elif is_regression:
+                result["predicted_value"] = float(np.mean(preds_array))
+            else:  # Classification
+                avg_probs = np.mean(preds_array, axis=0)
+                pred_label_idx = np.argmax(avg_probs)
+                model_classes = getattr(model, 'classes_', [f"Class_{i}" for i in range(len(avg_probs))])
+                result["predicted_label"] = str(model_classes[pred_label_idx])
+                result["probabilities"] = {str(k): float(v) for k, v in zip(model_classes, avg_probs)}
+
+            final_predictions.append(result)
+
+        # --- 12. 构造成功响应 ---
+        success_response = {
+            "state": 200,
+            "message": "分析成功",
+            "data": {
+                "check_result.json": {
+                    "model_info": {
+                        "train_id": model_train_id,
+                        "train_name": model_train_name,
+                        "artifact_path": model_artifact_path_prefix,
+                        "performance_metrics": {}
+                    },
+                    "pipeline_executed": {
+                        "preprocessing": [m['method_name'] if isinstance(m, dict) else m for m in preprocess_methods],
+                        "feature_extraction": feature_extract_method,
+                        "windowing_params": {
+                            "window_size": window_size, "step_size": step_size, "is_overlapping": is_overlapping
+                        }
+                    },
+                    "prediction": final_predictions
+                }
+            }
+        }
+        return jsonify(success_response), 200
+
+    except psycopg2.Error as e:
+        print(f"数据库错误: {e}")
+        return jsonify({"state": 500, "message": f"数据库错误: {e}"}), 500
+    except Exception as e:
+        import traceback
+        print(f"发生意外错误: {e}\n{traceback.format_exc()}")
+        return jsonify({"state": 500, "message": f"发生内部服务器错误: {e}"}), 500
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+        print("DEBUG: Database connection closed.")
+
+
 
 
 # 5.12新增AI模型应用接口：

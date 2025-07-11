@@ -403,6 +403,7 @@ def evaluate_sklearn_model(model, X_train_df, X_test_df, y_train_series, y_test_
     train_time = time.time() - start_time
     results = {'训练时间': train_time, 'model_name': model_type}
     if mse is not None: results['均方误差'] = mse
+    # 删除召回率
     if recall is not None: results['召回率'] = recall
     if f1 is not None: results['F1值'] = f1
     if accuracy is not None: results['准确率'] = accuracy

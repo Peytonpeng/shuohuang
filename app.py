@@ -2282,6 +2282,8 @@ def start_model_training():
         current_training_instance_id = str(uuid.uuid4())
         param_data_req_json = json.dumps(param_data_req)
 
+        #修改model_train_name的存储逻辑
+        model_train_save_name = f"XX对象_{actual_model_name}_{num_unique_labels_generated}分类"
 
         # model_train_data不存进数据库了，没有用，浪费资源
         query_insert_train_instance = """
@@ -2290,7 +2292,7 @@ def start_model_training():
         VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
         cursor.execute(query_insert_train_instance, (
-            current_training_instance_id, model_id_req, actual_model_name,
+            current_training_instance_id, model_id_req,  model_train_save_name,
             param_data_req_json, str(data.get("param_auto_perfect", "")),
             create_user_req, create_time_req
         ))

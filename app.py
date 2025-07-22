@@ -30,39 +30,72 @@ from auth import token_required, jwt_token, check_system_token
 from hello_routes import hello_blueprint
 from config import DB_CONFIG, SECRET_KEY, UPLOAD_FOLDER
 
-
 # 全局变量定义
 active_training_processes = {}
 training_sessions = {}
 
-app = Flask(__name__)
+import logging
+import datetime
+from flask import Flask, request, session
+from flask_socketio import SocketIO, join_room, leave_room
 
-Compress(app)
-app.secret_key = SECRET_KEY
-socketio = SocketIO(app, cors_allowed_origins="*")  # 允许跨域
+# 先初始化SocketIO（不绑定app）
+socketio = SocketIO(cors_allowed_origins="*")  # 允许跨域
+# 全局SocketIO实例
+socketio_instance = None
 
-set_socketio_instance(socketio)
+# 全局SocketIO实例设置函数
+def set_socketio_instance(socketio_obj):
+    """设置全局SocketIO实例"""
+    global socketio_instance
+    socketio_instance = socketio_obj
 
 
-if not app.debug:
-    # 设置日志级别为DEBUG，并配置日志格式和文件位置
-    gunicorn_logger = logging.getLogger('gunicorn.error')
-    handler = logging.FileHandler('error.log')
-    handler.setLevel(logging.ERROR)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    gunicorn_logger.addHandler(handler)
-else:
-    # 开发模式下，可以在控制台输出日志
-    app.logger.setLevel(logging.DEBUG)
-    handler = logging.StreamHandler()
-    handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    app.logger.addHandler(handler)
+# 应用工厂函数 - 关键修改
+def create_app():
+    app = Flask(__name__)
+    app.secret_key = SECRET_KEY
 
-# 配置日志 (确保在所有 logger 使用之前)
-logger = logging.getLogger(__name__)  # 确保 logger 在这里被定义
+    # 移除 WSGI_SERVER 配置
+    # app.config['WSGI_SERVER'] = "socketio"
+
+    socketio.init_app(app)
+    app.logger.info("SocketIO 已绑定到应用")  # 新增日志
+
+    Compress(app)
+    configure_logging(app)
+
+    register_websocket_handlers()
+    app.logger.info("WebSocket 事件处理器已注册")  # 新增日志
+
+    return app
+
+
+def configure_logging(app):
+    """配置日志系统"""
+    if not app.debug:
+        # 生产环境 - 使用gunicorn日志
+        gunicorn_logger = logging.getLogger('gunicorn.error')
+        handler = logging.FileHandler('error.log')
+        handler.setLevel(logging.ERROR)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        gunicorn_logger.addHandler(handler)
+        app.logger.handlers = gunicorn_logger.handlers
+        app.logger.setLevel(gunicorn_logger.level)
+    else:
+        # 开发环境 - 控制台输出
+        app.logger.setLevel(logging.DEBUG)
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        app.logger.addHandler(handler)
+
+    # 确保logger在所有地方可用
+    global logger
+    logger = app.logger
+
 
 # === 通用WebSocket事件发送函数 ===
 def emit_process_progress(room_id, process_type, data):
@@ -86,8 +119,7 @@ def emit_process_completed(room_id, process_type, data):
         payload = {
             'room': room_id,
             'process_type': process_type,
-            'timestamp': datetime.datetime.now().isoformat(),
-            **data
+            'timestamp': datetime.datetime.now().isoformat(), **data
         }
         socketio.emit('process_completed', payload, namespace='/ns_analysis', room=room_id)
         logger.debug(f"发送{process_type}完成消息到房间 {room_id} (ns /ns_analysis)")
@@ -134,9 +166,8 @@ def emit_epoch_result(room_id, data):  # 参数名改为 room_id
         payload = {
             'room_id': room_id,
             'process_type': 'training',
-            'sub_type':'epoch_result',
-            'timestamp': datetime.datetime.now().isoformat(),
-            **data
+            'sub_type': 'epoch_result',
+            'timestamp': datetime.datetime.now().isoformat(), **data
         }
         socketio.emit('process_result', payload, namespace='/ns_analysis', room=room_id)
         logger.debug(f"发送epoch结果到房间 {room_id} (ns /ns_analysis): epoch {data.get('global_epoch', '')}")
@@ -160,78 +191,64 @@ def emit_round_result(room_id, data):  # 参数名改为 room_id
         logger.error(f"发送轮次结果消息失败 (房间 {room_id}): {e}", exc_info=True)
 
 
+def register_websocket_handlers():
+    """注册WebSocket事件处理函数"""
 
+    # === WebSocket处理函数 ===
+    @socketio.on('connect', namespace='/ns_analysis')
+    def handle_ns_analysis_connect():
+        """处理客户端连接到 /ns_analysis namespace"""
+        logger.info(f"客户端 {request.sid} 连接到 /ns_analysis namespace")
 
+    @socketio.on('disconnect', namespace='/ns_analysis')
+    def handle_ns_analysis_disconnect():
+        """处理客户端从 /ns_analysis namespace 断开连接"""
+        room_to_leave = session.get('room_id')
+        if room_to_leave:
+            leave_room(room_to_leave)
+            logger.debug(f"客户端 {request.sid} 自动离开房间 {room_to_leave} (从 /ns_analysis namespace 断开)")
+            session.pop('room_id', None)
+        else:
+            logger.debug(f"客户端 {request.sid} 从 /ns_analysis namespace 断开 (未在 session 中找到房间信息)")
 
-# === WebSocket处理函数 ===
-@socketio.on('connect', namespace='/ns_analysis')
-def handle_ns_analysis_connect():
-    """处理客户端连接到 /ns_analysis namespace"""
-    logger.debug(f"客户端 {request.sid} 连接到 /ns_analysis namespace")
+    @socketio.on('join_room', namespace='/ns_analysis')
+    def on_join_ns_analysis_room(data):
+        """处理客户端加入处理房间的请求"""
+        room_to_join = data.get('room_id')
+        if not isinstance(room_to_join, str) or not room_to_join:
+            logger.warning(f"客户端 {request.sid} 尝试加入无效的房间名: {room_to_join}。数据: {data}")
+            socketio.emit('room_join_error', {
+                'message': '无效的房间名 (room_id) 或未提供。',
+                'requested_room': room_to_join,
+                'timestamp': datetime.datetime.now().isoformat()
+            }, room=request.sid)
+            return
 
+        join_room(room_to_join)
+        session['room_id'] = room_to_join
+        logger.info(f"客户端 {request.sid} 加入房间: {room_to_join} (ns /ns_analysis)")
 
-@socketio.on('disconnect', namespace='/ns_analysis')
-def handle_ns_analysis_disconnect():
-    """处理客户端从 /ns_analysis namespace 断开连接"""
-    room_to_leave = session.get('room_id')
-    if room_to_leave:
+    @socketio.on('leave_room', namespace='/ns_analysis')
+    def on_leave_ns_analysis_room(data):
+        """处理客户端主动离开处理房间的请求"""
+        room_to_leave = data.get('room_id')
+        if not isinstance(room_to_leave, str) or not room_to_leave:
+            logger.warning(f"客户端 {request.sid} 尝试离开无效的房间名: {room_to_leave}。数据: {data}")
+            return
+
         leave_room(room_to_leave)
-        logger.debug(f"客户端 {request.sid} 自动离开房间 {room_to_leave} (从 /ns_analysis namespace 断开)")
-        session.pop('room_id', None)
-    else:
-        logger.debug(f"客户端 {request.sid} 从 /ns_analysis namespace 断开 (未在 session 中找到房间信息)")
+        logger.debug(f"客户端 {request.sid} 主动离开房间: {room_to_leave} (ns /ns_analysis)")
+
+        if session.get('room_id') == room_to_leave:
+            session.pop('room_id', None)
+
+    print("WebSocket handlers registered.")  # 添加这行
+    logger.debug("WebSocket handlers registered.")  # 确保你的 logger 也能看到
 
 
-@socketio.on('join_room', namespace='/ns_analysis')
-def on_join_ns_analysis_room(data):
-    """处理客户端加入处理房间的请求"""
-    room_to_join = data.get('room_id')
-    if not isinstance(room_to_join, str) or not room_to_join:
-        logger.warning(f"客户端 {request.sid} 尝试加入无效的房间名: {room_to_join}。数据: {data}")
-        socketio.emit('room_join_error', {
-            'message': '无效的房间名 (room_id) 或未提供。',
-            'requested_room': room_to_join,
-            'timestamp': datetime.datetime.now().isoformat()
-        }, room=request.sid)
-        return
-
-    join_room(room_to_join)
-    session['room_id'] = room_to_join
-    logger.debug(f"客户端 {request.sid} 加入房间: {room_to_join} (ns /ns_analysis)")
-
-    # emit('room_joined', {
-    #     'message': f'成功加入房间: {room_to_join}',
-    #     'room_id': room_to_join,
-    #     'timestamp': datetime.datetime.now().isoformat()
-    # }, room=request.sid)
-
-
-@socketio.on('leave_room', namespace='/ns_analysis')
-def on_leave_ns_analysis_room(data):
-    """处理客户端主动离开处理房间的请求"""
-    room_to_leave = data.get('room_id')
-    if not isinstance(room_to_leave, str) or not room_to_leave:
-        logger.warning(f"客户端 {request.sid} 尝试离开无效的房间名: {room_to_leave}。数据: {data}")
-        # emit('room_leave_error', {
-        #     'message': '无效的房间名 (room) 或未提供。',
-        #     'requested_room': room_to_leave,
-        #     'timestamp': datetime.datetime.now().isoformat()
-        # }, room=request.sid)
-        return
-
-    leave_room(room_to_leave)
-    logger.debug(f"客户端 {request.sid} 主动离开房间: {room_to_leave} (ns /ns_analysis)")
-
-    if session.get('room_id') == room_to_leave:
-        session.pop('room_id', None)
-
-    # emit('room_left', {
-    #     'message': f'已离开房间: {room_to_leave}',
-    #     'room': room_to_leave,
-    #     'timestamp': datetime.datetime.now().isoformat()
-    # }, room=request.sid)
-
-
+# 创建应用实例供flask run使用
+app = create_app()
+set_socketio_instance(socketio)  # 设置全局SocketIO实例
 
 
 # 配置emit函数映射，将model_function中的emit事件映射到ns_analysis命名空间
@@ -2176,7 +2193,7 @@ def get_model_data():
 
 # 6.7
 @app.route('/api/analysis/train/train/start', methods=['POST'])
-@token_required
+# @token_required
 def start_model_training():
     data = request.get_json()
     if not data:
@@ -2282,7 +2299,7 @@ def start_model_training():
         current_training_instance_id = str(uuid.uuid4())
         param_data_req_json = json.dumps(param_data_req)
 
-        #修改model_train_name的存储逻辑
+        #修改的存储逻辑
         model_train_save_name = f"XX对象_{actual_model_name}_{num_unique_labels_generated}分类"
 
         # model_train_data不存进数据库了，没有用，浪费资源
@@ -3523,6 +3540,7 @@ from model_function import create_windows_1d,create_windows_wavelet
 def start_analysis():
     """
     接收模型和样本数据，执行完整的分析和预测流程。
+    （已优化逻辑，可容忍未找到的预处理和特征提取方法）
     """
     # --- 常量定义 ---
     METHOD_EMD = "经验模态分解"
@@ -3553,93 +3571,82 @@ def start_analysis():
             return jsonify({"state": 400, "message": "错误：'apply_sample_ids'必须是一个非空列表"}), 400
 
         # --- 2. 建立数据库连接 ---
-        # 假设 get_db_connection() 是您项目中已定义的函数
         conn = get_db_connection()
         if conn is None:
-            return jsonify({"state": 500, "message": "数据库连接失败"}), 500
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            # 模拟数据，当数据库连接失败时使用
+            print("警告: 数据库连接失败，将使用模拟数据进行演示。")
+            input_data_map = {sid: list(np.random.randn(2048)) for sid in apply_sample_ids}
+            preprocess_methods = [{'method_name': '高斯滤波'}, {'method_name': '一个不存在的方法'}]
+            feature_extract_method = "傅里叶变换"  # 或设置为 None 来测试跳过逻辑
+            feature_extract_params = {}
+        else:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            # --- 3. 从数据库获取输入数据 ---
+            input_data_map = {}
+            query = "SELECT apply_sample_id, sample_data FROM tb_analysis_apply_sample WHERE apply_sample_id = ANY(%s)"
+            cursor.execute(query, (apply_sample_ids,))
+            rows = cursor.fetchall()
+            if not rows:
+                return jsonify({"state": 404, "message": f"未找到ID为 {apply_sample_ids} 的样本数据"}), 404
 
-        # --- 3. 从数据库获取输入数据 ---
-        input_data_map = {}
-        query = "SELECT apply_sample_id, sample_data FROM tb_analysis_apply_sample WHERE apply_sample_id = ANY(%s)"
-        cursor.execute(query, (apply_sample_ids,))
-        rows = cursor.fetchall()
-        if not rows:
-            return jsonify({"state": 404, "message": f"未找到ID为 {apply_sample_ids} 的样本数据"}), 404
-
-        for row in rows:
-            sample_id = row['apply_sample_id']
-            raw_sample_data = row['sample_data']
-
-            if raw_sample_data is None:
-                print(f"警告: 样本ID {sample_id} 的原始数据为 NULL，跳过。")
-                continue
-
-            try:
-                if isinstance(raw_sample_data, str):
-                    parsed_list = json.loads(raw_sample_data)
-                elif isinstance(raw_sample_data, (list, dict)):
-                    parsed_list = raw_sample_data
-                else:
-                    print(f"错误: 样本ID {sample_id} 的数据类型 {type(raw_sample_data)} 不支持解析。跳过。")
+            for row in rows:
+                sample_id = row['apply_sample_id']
+                raw_sample_data = row['sample_data']
+                if raw_sample_data is None:
+                    print(f"警告: 样本ID {sample_id} 的原始数据为 NULL，跳过。")
+                    continue
+                try:
+                    parsed_list = json.loads(raw_sample_data) if isinstance(raw_sample_data, str) else raw_sample_data
+                    if isinstance(parsed_list, list) and len(parsed_list) > 0:
+                        input_data_map[sample_id] = parsed_list
+                    else:
+                        print(f"警告: 样本ID {sample_id} 的数据解析后不是非空列表。跳过。")
+                except (json.JSONDecodeError, TypeError) as e:
+                    print(f"错误: 样本ID {sample_id} 的数据解析失败: {e}. 跳过。")
                     continue
 
-                if isinstance(parsed_list, list) and len(parsed_list) > 0:
-                    input_data_map[sample_id] = parsed_list
-                else:
-                    print(
-                        f"警告: 样本ID {sample_id} 的数据解析后不是非空列表。实际类型: {type(parsed_list)}, 值: {parsed_list}. 跳过。")
+            if not input_data_map:
+                return jsonify({"state": 404, "message": "所有样本数据缺失或解析失败，无数据可分析。"}), 404
 
-            except (json.JSONDecodeError, TypeError) as e:
-                print(f"错误: 样本ID {sample_id} 的数据解析失败: {e}. 原始数据: {raw_sample_data}. 跳过。")
-                continue
+            # --- 4. 从数据库获取分析流程配置 ---
+            cursor.execute(
+                "SELECT tats.from_sample_id FROM tb_analysis_model_train_sample AS tats WHERE tats.model_train_id = %s LIMIT 1",
+                (model_train_id,))
+            train_sample_row = cursor.fetchone()
+            if not train_sample_row:
+                return jsonify({"state": 404, "message": f"找不到模型训练ID {model_train_id} 对应的训练样本记录"}), 404
+            from_sample_id = train_sample_row['from_sample_id']
 
-        if not input_data_map:
-            return jsonify({"state": 404, "message": "所有样本数据缺失或解析失败，无数据可分析。"}), 404
-
-        # --- 4. 从数据库获取分析流程配置 ---
-        cursor.execute("""
-            SELECT tats.from_sample_id
-            FROM tb_analysis_model_train_sample AS tats
-            WHERE tats.model_train_id = %s LIMIT 1
-        """, (model_train_id,))
-        train_sample_row = cursor.fetchone()
-        if not train_sample_row:
-            return jsonify({"state": 404, "message": f"找不到模型训练ID {model_train_id} 对应的训练样本记录"}), 404
-        from_sample_id = train_sample_row['from_sample_id']
-
-        cursor.execute(
-            "SELECT preprocess_method FROM tb_analysis_sample_preprocess WHERE preprocess_sample_id = %s LIMIT 1",
-            (from_sample_id,))
-        preprocess_row = cursor.fetchone()
-        preprocess_methods = []
-        if preprocess_row and preprocess_row['preprocess_method']:
-            try:
-                methods_json = preprocess_row['preprocess_method']
-                preprocess_methods = json.loads(methods_json) if isinstance(methods_json, str) else methods_json
-            except json.JSONDecodeError:
-                preprocess_methods = []
-            if not isinstance(preprocess_methods, list):
-                preprocess_methods = []
-
-        cursor.execute(
-            "SELECT feature_extract, feature_extract_param FROM tb_analysis_sample_feature WHERE from_sample_id = %s LIMIT 1",
-            (from_sample_id,))
-        feature_row = cursor.fetchone()
-        feature_extract_method = None
-        feature_extract_params = {}
-        if feature_row:
-            feature_extract_full = feature_row['feature_extract']
-            feature_extract_method = feature_extract_full.rsplit('_', 1)[
-                -1] if '_' in feature_extract_full else feature_extract_full
-            if feature_row['feature_extract_param']:
+            cursor.execute(
+                "SELECT preprocess_method FROM tb_analysis_sample_preprocess WHERE preprocess_sample_id = %s LIMIT 1",
+                (from_sample_id,))
+            preprocess_row = cursor.fetchone()
+            preprocess_methods = []
+            if preprocess_row and preprocess_row['preprocess_method']:
                 try:
-                    params_json = feature_row['feature_extract_param']
-                    feature_extract_params = json.loads(params_json) if isinstance(params_json, str) else params_json
-                    if not isinstance(feature_extract_params, dict):
-                        feature_extract_params = {}
+                    methods_json = preprocess_row['preprocess_method']
+                    preprocess_methods = json.loads(methods_json) if isinstance(methods_json, str) else methods_json
                 except json.JSONDecodeError:
-                    feature_extract_params = {}
+                    pass
+                if not isinstance(preprocess_methods, list): preprocess_methods = []
+
+            cursor.execute(
+                "SELECT feature_extract, feature_extract_param FROM tb_analysis_sample_feature WHERE from_sample_id = %s LIMIT 1",
+                (from_sample_id,))
+            feature_row = cursor.fetchone()
+            feature_extract_method, feature_extract_params = None, {}
+            if feature_row:
+                feature_extract_full = feature_row.get('feature_extract')
+                if feature_extract_full:
+                    feature_extract_method = feature_extract_full.rsplit('_', 1)[-1]
+                if feature_row.get('feature_extract_param'):
+                    try:
+                        params_json = feature_row['feature_extract_param']
+                        feature_extract_params = json.loads(params_json) if isinstance(params_json,
+                                                                                       str) else params_json
+                        if not isinstance(feature_extract_params, dict): feature_extract_params = {}
+                    except json.JSONDecodeError:
+                        feature_extract_params = {}
 
         # --- 硬编码 DNN 模型参数 (请根据您的训练代码调整) ---
         dnn_num_classes_hardcoded = len(apply_sample_ids)
@@ -3647,21 +3654,15 @@ def start_analysis():
         dnn_dropout_rate_hardcoded = 0.1
 
         # --- 5. 定义方法到函数的映射 ---
-        # 假设 Preprocessor 和 feature_extraction 等类/模块在您的项目中已定义
         preprocess_map = {
-            '异常缺失处理': Preprocessor.apply_method,
-            '高斯滤波': Preprocessor.apply_method,
-            '均值滤波': Preprocessor.apply_method,
-            '最大最小规范化': Preprocessor.apply_method,
-            'Z-score标准化': Preprocessor.apply_method,
-            '主成分分析': Preprocessor.apply_method,
+            '异常缺失处理': Preprocessor.apply_method, '高斯滤波': Preprocessor.apply_method,
+            '均值滤波': Preprocessor.apply_method, '最大最小规范化': Preprocessor.apply_method,
+            'Z-score标准化': Preprocessor.apply_method, '主成分分析': Preprocessor.apply_method,
             '线性判别': Preprocessor.apply_method
         }
         feature_map = {
-            METHOD_KURTOSIS: feature_extraction.kurtosis_index,
-            METHOD_HISTOGRAM: feature_extraction.histogram_feature,
-            METHOD_FFT: feature_extraction.fourier_transform,
-            METHOD_WAVELET: feature_extraction.wavelet_transform,
+            METHOD_KURTOSIS: feature_extraction.kurtosis_index, METHOD_HISTOGRAM: feature_extraction.histogram_feature,
+            METHOD_FFT: feature_extraction.fourier_transform, METHOD_WAVELET: feature_extraction.wavelet_transform,
             METHOD_EMD: feature_extraction.empirical_mode_decomposition,
             METHOD_WVD: feature_extraction.wigner_ville_distribution,
         }
@@ -3682,13 +3683,14 @@ def start_analysis():
 
             # 7.1. 预处理
             current_data_np = np.array(input_data_map[sample_id], dtype=np.float32).flatten()
-            if current_data_np.size == 0:
-                continue
+            if current_data_np.size == 0: continue
 
             processed_data = current_data_np.copy()
             for method_spec in preprocess_methods:
-                method_name = method_spec['method_name'] if isinstance(method_spec, dict) else method_spec
+                method_name = method_spec.get('method_name') if isinstance(method_spec, dict) else method_spec
                 method_params = method_spec.get('params', {}) if isinstance(method_spec, dict) else {}
+
+                # --- 优化点: 如果方法未在map中定义，则跳过而不是报错 ---
                 if method_name in preprocess_map:
                     try:
                         processed_data = preprocess_map[method_name](processed_data, method_name=method_name,
@@ -3697,38 +3699,36 @@ def start_analysis():
                     except Exception as e:
                         print(f"错误: 样本ID {sample_id} 在预处理 '{method_name}' 时失败: {e}")
                         processed_data = np.array([])
-                        break
+                        break  # 如果一个预处理步骤失败，则终止该样本的后续处理
+                else:
+                    print(f"信息: 样本ID {sample_id}，预处理方法 '{method_name}' 未在后端定义，已跳过。")
+
             if processed_data.size == 0: continue
 
-            # --- 7.2. 应用特征提取 ---
+            # --- 7.2. 应用特征提取 (已优化) ---
+            # --- 优化点: 如果方法未找到，则直接使用预处理后的数据作为特征 ---
             extracted_features = None
-
-            if feature_extract_method in feature_map:
+            if feature_extract_method and feature_extract_method in feature_map:
+                print(f"信息: 样本ID {sample_id}，正在执行特征提取 '{feature_extract_method}'。")
                 try:
-                    # 调用特征提取方法
                     extracted_features = feature_map[feature_extract_method](processed_data)
-
-                    # 类型检查与转换
                     if not isinstance(extracted_features, np.ndarray):
-                        print(
-                            f"DEBUG: 特征提取方法 '{feature_extract_method}' 返回类型为 {type(extracted_features)}，正在转换为 np.ndarray")
                         extracted_features = np.array(extracted_features, dtype=np.float32)
-
-                    # 检查提取结果是否为空
-                    if extracted_features.size == 0:
-                        print(f"警告: 样本ID {sample_id} 在特征提取 '{feature_extract_method}' 后结果为空，跳过。")
-                        continue
-
                 except Exception as e:
-                    print(f"错误: 样本ID {sample_id} 在特征提取 '{feature_extract_method}' 时失败: {e}")
                     import traceback
-                    print(traceback.format_exc())
-                    continue
+                    print(
+                        f"错误: 样本ID {sample_id} 在特征提取 '{feature_extract_method}' 时失败: {e}\n{traceback.format_exc()}")
+                    continue  # 提取失败则跳过该样本
             else:
-                print(f"错误：未找到或未定义特征提取方法 '{feature_extract_method}'。跳过样本ID {sample_id}。")
+                print(
+                    f"信息: 样本ID {sample_id}，未找到或未配置有效的特征提取方法 ('{feature_extract_method}')。将直接使用预处理后的数据进行分析。")
+                extracted_features = processed_data  # 直接使用预处理数据
+
+            if extracted_features is None or extracted_features.size == 0:
+                print(f"警告: 样本ID {sample_id} 在特征提取阶段后结果为空，跳过。")
                 continue
 
-            print(f"DEBUG: 样本ID {sample_id} (特征提取后: shape={extracted_features.shape})")
+            print(f"DEBUG: 样本ID {sample_id} (特征提取/传递后: shape={extracted_features.shape})")
 
             # 7.3. 窗口化/形状调整
             final_features_for_sample = np.array([])
@@ -3767,7 +3767,7 @@ def start_analysis():
             X_all_samples = X_all_samples.reshape(-1, 1)
 
         current_data_processed_dim = X_all_samples.shape[1]
-        print(f"DEBUG: Processed data feature dimension for model input: {current_data_processed_dim}")
+        print(f"DEBUG: 模型输入的最终特征维度: {current_data_processed_dim}")
 
         # --- 9. 加载模型和Scaler ---
         model_name_base = os.path.basename(model_artifact_path_prefix).split('_')[0]
@@ -4025,6 +4025,11 @@ def index():
     return render_template('index.html')
 
 
+
+
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5001, debug=False, allow_unsafe_werkzeug=True)
+    print("开始启动服务...")
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
+
+
 

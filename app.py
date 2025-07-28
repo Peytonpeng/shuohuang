@@ -1246,7 +1246,7 @@ def fetch_samples_prioritized():
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-# 5.12特征选择还未实现
+
 
 @app.route('/api/analysis/train/feature/confirm', methods=['POST'])
 @token_required
@@ -3774,9 +3774,27 @@ def start_analysis():
         is_dnn = (model_name_base == '深度神经网络')
         model_path = model_artifact_path_prefix + ('.pth' if is_dnn else '.joblib')
         scaler_path = model_artifact_path_prefix + '_scaler.joblib'
+        # 新增：类别元数据路径
+        metadata_path = model_artifact_path_prefix + '_metadata.joblib'
 
         if not os.path.exists(model_path):
             return jsonify({"state": 404, "message": f"在路径 {model_path} 未找到模型文件"}), 404
+
+        # 新增：加载类别元数据
+        try:
+            if os.path.exists(metadata_path):
+                    metadata = joblib.load(metadata_path)
+                    # 从元数据中获取训练时的类别数和类别列表
+                    num_classes = metadata.get("num_classes", None)
+                    model_classes = metadata.get("classes", None)
+                    print(f"成功加载类别元数据: 类别数={num_classes}, 类别列表={model_classes}")
+            else:
+                    # 兼容旧模型：如果没有元数据，保留原有逻辑但警告
+                    num_classes = len(apply_sample_ids)
+                    model_classes = None
+                    print(f"警告: 未找到类别元数据文件 {metadata_path}，将使用默认类别数")
+        except Exception as e:
+            return jsonify({"state": 500, "message": f"加载类别元数据失败: {e}"}), 500
 
         try:
             if is_dnn:
@@ -4029,7 +4047,7 @@ def index():
 
 if __name__ == '__main__':
     print("开始启动服务...")
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='0.0.0.0', port=5001, debug=True, allow_unsafe_werkzeug=True)
 
 
 

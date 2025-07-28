@@ -469,6 +469,7 @@ def evaluate_sklearn_model_on_test_set(model, X_test_df, y_test_series, model_ty
 
 # --- 模型训练主函数 (集成 SocketIO) ---
 def train_model(json_data, label_column, model_name, param_data, training_id=None, stop_event=None):
+    start_time = time.time()
     """训练模型的主入口点，处理数据并调用特定模型训练函数"""
     print(f"训练输入数据 (前200字符): {json_data[:200]}...")
     emit_process_progress(training_id, 'training',
@@ -706,7 +707,20 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
                 try:
                     torch.save(model_instance.state_dict(), f"{model_path}.pth")
                     joblib.dump(scaler, f"{model_path}_scaler.joblib")
-                    print(f"DNN 模型和 Scaler 已保存到: {model_path}.pth / .joblib")
+                    # -------------------- 新增：保存类别信息 --------------------
+                    # 获取训练数据中的所有类别（按出现顺序排序，确保一致性）
+                    unique_classes = sorted(y_final_series.unique().tolist())
+                    num_classes = len(unique_classes)
+                    # 保存类别元数据（包含类别列表和数量）
+                    metadata = {
+                        "classes": unique_classes,  # 类别列表（如 [0,1,2] 或 ['Class_0', 'Class_1', 'Class_2']）
+                        "num_classes": num_classes,
+                        "label_column": label_column  # 标签列名称（可选，用于追溯）
+                    }
+                    joblib.dump(metadata, f"{model_path}_metadata.joblib")
+                    # ---------------------------------------------------------
+
+                    print(f"DNN 模型、Scaler 和类别元数据已保存到: {model_path}.pth / .joblib / _metadata.joblib")
                 except Exception as e:
                     print(f"保存 DNN 模型或 Scaler 失败: {e}")
     else: # Scikit-learn 模型

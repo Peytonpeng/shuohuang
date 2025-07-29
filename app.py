@@ -300,7 +300,7 @@ def token():
         value = jwt_token(SystemToken)
         # 将token保存到session作为默认的WebSocket room id
         session['room_id'] = value['token']
-        logger.debug(f"用户登录成功，设置room ID为: {value['token']}")
+        logger.info(f"用户登录成功，设置room ID为: {value['token']}")
         return jsonify(value)
 
 
@@ -438,8 +438,17 @@ def get_sample_data():
             if not os.path.exists(file_path):
                 return jsonify({"state": 404, "message": "文件不存在"}), 404
 
+            df = None
             # 读取 CSV 数据
-            df = pd.read_csv(file_path)
+            try:
+                df = pd.read_csv(file_path)
+                # 删除所有列都是NaN的行
+                df.dropna(how='all', inplace=True)
+                # 接下来再将剩余的 NaN 填充为空字符串（针对有效数据中的个别NaN）
+                df.fillna('', inplace=True)
+
+            except Exception as e:
+                return jsonify({"state": 500, "message": f"读取或处理CSV文件失败: {str(e)}"}), 500
 
             sample_list = []
             data_to_return = []
@@ -2193,7 +2202,7 @@ def get_model_data():
 
 # 6.7
 @app.route('/api/analysis/train/train/start', methods=['POST'])
-# @token_required
+@token_required
 def start_model_training():
     data = request.get_json()
     if not data:

@@ -118,9 +118,80 @@ def create_windows_wavelet(sequence_2d, label, window_size, step, is_overlapping
     return np.array(windowed_data_flat, dtype=np.float32), np.array(windowed_labels, dtype=int)
 
 
-# --- 通用 DNN 模型 (包含 CNN 层) ---
+# # --- 通用 DNN 模型 (包含 CNN 层) ---
+# class GenericDNN(nn.Module):
+#     def __init__(self, input_dim, num_classes, hidden_dims=[128, 64], dropout_rate=0.1):
+#         super(GenericDNN, self).__init__()
+#
+#         # --- CNN 特征提取部分 ---
+#         self.conv1 = nn.Conv1d(in_channels=1, out_channels=32, kernel_size=3, padding=1)
+#         self.bn1 = nn.BatchNorm1d(32)
+#         self.relu1 = nn.ReLU()
+#         self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)
+#         self.conv2 = nn.Conv1d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
+#         self.bn2 = nn.BatchNorm1d(64)
+#         self.relu2 = nn.ReLU()
+#         self.pool2 = nn.MaxPool1d(kernel_size=2, stride=2)
+#
+#         # --- 计算卷积层输出的展平维度 ---
+#         with torch.no_grad():
+#             dummy_input = torch.randn(1, 1, input_dim)
+#             dummy_output_conv1 = self.pool1(self.relu1(self.bn1(self.conv1(dummy_input))))
+#             dummy_output_conv2 = self.pool2(self.relu2(self.bn2(self.conv2(dummy_output_conv1))))
+#             self.flattened_dim = dummy_output_conv2.view(1, -1).size(1)
+#
+#         # --- 全连接分类部分 ---
+#         layers = []
+#         current_dim = self.flattened_dim
+#         for h_dim in hidden_dims:
+#             layers.append(nn.Linear(current_dim, h_dim))
+#             layers.append(nn.ReLU())
+#             if dropout_rate > 0:
+#                 layers.append(nn.Dropout(dropout_rate))
+#             current_dim = h_dim
+#         layers.append(nn.Linear(current_dim, num_classes))
+#         self.classifier_layers = nn.Sequential(*layers)
+#
+#         # --- 权重初始化 ---
+#         self._initialize_weights()
+#
+#     def _initialize_weights(self):
+#         """改进的权重初始化"""
+#         for m in self.modules():
+#             if isinstance(m, nn.Conv1d):
+#                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+#                 if m.bias is not None:
+#                     nn.init.constant_(m.bias, 0)
+#             elif isinstance(m, nn.Linear):
+#                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+#                 if m.bias is not None:
+#                     nn.init.constant_(m.bias, 0)
+#             elif isinstance(m, nn.BatchNorm1d):
+#                 nn.init.constant_(m.weight, 1)
+#                 nn.init.constant_(m.bias, 0)
+#
+#     def forward(self, x):
+#         # 添加数值稳定性检查
+#         if torch.isnan(x).any() or torch.isinf(x).any():
+#             print("警告: 输入包含NaN或Inf值")
+#
+#         x = x.unsqueeze(1)  # 增加通道维度
+#         x = self.pool1(self.relu1(self.bn1(self.conv1(x))))
+#         x = self.pool2(self.relu2(self.bn2(self.conv2(x))))
+#         x = x.view(x.size(0), -1)  # 展平
+#
+#         # 添加数值检查
+#         if torch.isnan(x).any() or torch.isinf(x).any():
+#             print("警告: 卷积层输出包含NaN或Inf值")
+#
+#         output = self.classifier_layers(x)
+#         return output
+
+
+
+# --- 简化的两层 CNN 模型 ---
 class GenericDNN(nn.Module):
-    def __init__(self, input_dim, num_classes, hidden_dims=[128, 64], dropout_rate=0.1):
+    def __init__(self, input_dim, num_classes, hidden_dims=[128, 64], dropout_rate=0.3): # 建议将默认 dropout_rate 提高一点，例如 0.3
         super(GenericDNN, self).__init__()
 
         # --- CNN 特征提取部分 ---
@@ -128,6 +199,7 @@ class GenericDNN(nn.Module):
         self.bn1 = nn.BatchNorm1d(32)
         self.relu1 = nn.ReLU()
         self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)
+
         self.conv2 = nn.Conv1d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
         self.bn2 = nn.BatchNorm1d(64)
         self.relu2 = nn.ReLU()
@@ -140,23 +212,18 @@ class GenericDNN(nn.Module):
             dummy_output_conv2 = self.pool2(self.relu2(self.bn2(self.conv2(dummy_output_conv1))))
             self.flattened_dim = dummy_output_conv2.view(1, -1).size(1)
 
-        # --- 全连接分类部分 ---
-        layers = []
-        current_dim = self.flattened_dim
-        for h_dim in hidden_dims:
-            layers.append(nn.Linear(current_dim, h_dim))
-            layers.append(nn.ReLU())
-            if dropout_rate > 0:
-                layers.append(nn.Dropout(dropout_rate))
-            current_dim = h_dim
-        layers.append(nn.Linear(current_dim, num_classes))
-        self.classifier_layers = nn.Sequential(*layers)
+        # --- 新增：Dropout 层 ---
+        # 只有当 dropout_rate > 0 时才创建 Dropout 层
+        self.dropout = nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity()
+
+        # --- 输出层 (直接连接到分类) ---
+        self.output_layer = nn.Linear(self.flattened_dim, num_classes)
 
         # --- 权重初始化 ---
         self._initialize_weights()
 
     def _initialize_weights(self):
-        """改进的权重初始化"""
+        """改进的权重初始化，应用于卷积层、线性层和BatchNorm层"""
         for m in self.modules():
             if isinstance(m, nn.Conv1d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -171,22 +238,31 @@ class GenericDNN(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        # 添加数值稳定性检查
-        if torch.isnan(x).any() or torch.isinf(x).any():
-            print("警告: 输入包含NaN或Inf值")
+        # 添加通道维度：从 (batch_size, input_dim) 变为 (batch_size, 1, input_dim)
+        x = x.unsqueeze(1)
 
-        x = x.unsqueeze(1)  # 增加通道维度
-        x = self.pool1(self.relu1(self.bn1(self.conv1(x))))
-        x = self.pool2(self.relu2(self.bn2(self.conv2(x))))
-        x = x.view(x.size(0), -1)  # 展平
+        # 通过第一层卷积块
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+        x = self.pool1(x)
 
-        # 添加数值检查
-        if torch.isnan(x).any() or torch.isinf(x).any():
-            print("警告: 卷积层输出包含NaN或Inf值")
+        # 通过第二层卷积块
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = self.relu2(x)
+        x = self.pool2(x)
 
-        output = self.classifier_layers(x)
+        # 展平特征图，为全连接层做准备
+        x = x.view(x.size(0), -1)
+
+        # --- 新增：应用 Dropout ---
+        # 只有在训练模式下 Dropout 才会起作用，评估模式下会被自动禁用
+        x = self.dropout(x)
+
+        # 通过输出层进行分类
+        output = self.output_layer(x)
         return output
-
 
 
 # --- 通用 DNN 模型的训练函数 (集成 SocketIO) ---

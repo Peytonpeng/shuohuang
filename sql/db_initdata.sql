@@ -1,15 +1,15 @@
-INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('1', 'ÏßĞÔ»Ø¹é', 'admin', '2025-04-01 11:38:48', '[{"param_name": "lr_max_iter", "param_values": [100, 1000, 2000], "default_value": "100"}, {"param_name": "lr_C", "param_values": [0.1, 1, 10], "default_value": "1"}, {"param_name": "lr_solver", "param_values": ["liblinear", "lbfgs", "sage"], "default_value": "sage"}]');
-INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('5', 'K-¾ùÖµ¾ÛÀà', 'admin', '2025-04-01 11:38:48', '[{
+INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('1', 'çº¿æ€§å›å½’', 'admin', '2025-04-01 11:38:48', '[{"param_name": "lr_max_iter", "param_values": [100, 1000, 2000], "default_value": "100"}, {"param_name": "lr_C", "param_values": [0.1, 1, 10], "default_value": "1"}, {"param_name": "lr_solver", "param_values": ["liblinear", "lbfgs", "sage"], "default_value": "sage"}]');
+INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('5', 'K-å‡å€¼èšç±»', 'admin', '2025-04-01 11:38:48', '[{
 	"param_name": "kmeans_n_clusters_param",
 	"param_values": [5, 8, 10],
 	"default_value": 5
 }]');
-INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('3', 'Ëæ»úÉ­ÁÖ', 'system', '2025-04-03 14:08:52', '[{
+INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('3', 'éšæœºæ£®æ—', 'system', '2025-04-03 14:08:52', '[{
 	"param_name": "n_estimators_param",
 	"param_values": [50, 100, 200],
 	"default_value": 50
 }]');
-INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('6', 'Éî¶ÈÉñ¾­ÍøÂç', 'admin', '2025-04-01 11:38:48', '[{
+INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('6', 'æ·±åº¦ç¥ç»ç½‘ç»œ', 'admin', '2025-04-01 11:38:48', '[{
 		"param_name": "num_classes",
 		"param_values": [3, 5, 10],
 		"default_value": 5
@@ -30,7 +30,7 @@ INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user"
 		"default_value": 0.001
 	}
 ]');
-INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('4', 'Ö§³ÖÏòÁ¿»ú', 'admin', '2025-04-01 11:38:48', '[{
+INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('4', 'æ”¯æŒå‘é‡æœº', 'admin', '2025-04-01 11:38:48', '[{
 		"param_name": "svc_C",
 		"param_values": [0.1, 1, 10],
 		"default_value": 1
@@ -46,5 +46,5 @@ INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user"
 		"default_value": "scale"
 	}
 ]');
-INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('7', 'RVFL»Ø¹éÆ÷', 'admin', '2025-06-20 10:54:09', '[]');
-INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('2', 'Âß¼­»Ø¹é', 'admin', '2025-04-01 11:38:48', '[{"default_value": 5, "param_name": "kmeans_n_clusters_param", "param_values": [5, 8, 10]}]');
+INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('7', 'RVFLå›å½’å™¨', 'admin', '2025-06-20 10:54:09', '[]');
+INSERT INTO "public"."tb_analysis_model"("model_id", "model_name", "create_user", "create_time", "param_config") VALUES ('2', 'é€»è¾‘å›å½’', 'admin', '2025-04-01 11:38:48', '[{"default_value": 5, "param_name": "kmeans_n_clusters_param", "param_values": [5, 8, 10]}]');

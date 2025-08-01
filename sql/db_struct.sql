@@ -12,7 +12,7 @@
  Target Server Version : 120014
  File Encoding         : 65001
 
- Date: 24/06/2025 17:18:27
+ Date: 15/07/2025 11:56:13
 */
 
 
@@ -26,18 +26,6 @@ CREATE TABLE "public"."tb_analysis_apply_check" (
   "param_data" "pg_catalog"."json",
   "param_auto_perfect" "pg_catalog"."varchar" COLLATE "pg_catalog"."default",
   "check_result" "pg_catalog"."text" COLLATE "pg_catalog"."default",
-  "create_user" "pg_catalog"."varchar" COLLATE "pg_catalog"."default",
-  "create_time" "pg_catalog"."timestamp"
-)
-;
-
--- ----------------------------
--- Table structure for tb_analysis_apply_check_sample
--- ----------------------------
-DROP TABLE IF EXISTS "public"."tb_analysis_apply_check_sample";
-CREATE TABLE "public"."tb_analysis_apply_check_sample" (
-  "check_id" "pg_catalog"."varchar" COLLATE "pg_catalog"."default" NOT NULL,
-  "from_apply_sample_id" "pg_catalog"."varchar" COLLATE "pg_catalog"."default" NOT NULL,
   "create_user" "pg_catalog"."varchar" COLLATE "pg_catalog"."default",
   "create_time" "pg_catalog"."timestamp"
 )
@@ -97,7 +85,8 @@ CREATE TABLE "public"."tb_analysis_model_train" (
   "param_auto_perfect" "pg_catalog"."varchar" COLLATE "pg_catalog"."default" DEFAULT NULL::character varying,
   "model_train_data" "pg_catalog"."text" COLLATE "pg_catalog"."default",
   "create_user" "pg_catalog"."varchar" COLLATE "pg_catalog"."default" DEFAULT NULL::character varying,
-  "create_time" "pg_catalog"."timestamp"
+  "create_time" "pg_catalog"."timestamp",
+  "model_artifact_path" "pg_catalog"."varchar" COLLATE "pg_catalog"."default"
 )
 ;
 
@@ -193,11 +182,6 @@ CREATE TABLE "public"."tb_analysis_sample_preprocess" (
 ALTER TABLE "public"."tb_analysis_apply_check" ADD CONSTRAINT "tb_analysis_apply_check_pkey" PRIMARY KEY ("check_id");
 
 -- ----------------------------
--- Primary Key structure for table tb_analysis_apply_check_sample
--- ----------------------------
-ALTER TABLE "public"."tb_analysis_apply_check_sample" ADD CONSTRAINT "tb_analysis_apply_check_sample_pkey" PRIMARY KEY ("check_id", "from_apply_sample_id");
-
--- ----------------------------
 -- Primary Key structure for table tb_analysis_apply_file
 -- ----------------------------
 ALTER TABLE "public"."tb_analysis_apply_file" ADD CONSTRAINT "tb_analysis_apply_file_pkey" PRIMARY KEY ("file_id");
@@ -246,11 +230,6 @@ ALTER TABLE "public"."tb_analysis_sample_original" ADD CONSTRAINT "tb_analysis_s
 -- Primary Key structure for table tb_analysis_sample_preprocess
 -- ----------------------------
 ALTER TABLE "public"."tb_analysis_sample_preprocess" ADD CONSTRAINT "tb_analysis_sample_preprocess_pkey" PRIMARY KEY ("preprocess_sample_id");
-
--- ----------------------------
--- Foreign Keys structure for table tb_analysis_apply_check_sample
--- ----------------------------
-ALTER TABLE "public"."tb_analysis_apply_check_sample" ADD CONSTRAINT "tb_analysis_apply_check_sample_from_apply_sample_id_fkey" FOREIGN KEY ("from_apply_sample_id") REFERENCES "public"."tb_analysis_apply_sample" ("apply_sample_id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- ----------------------------
 -- Foreign Keys structure for table tb_analysis_apply_sample

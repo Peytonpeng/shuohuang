@@ -258,6 +258,7 @@ emit_funcs = {
     'training_progress': emit_process_progress,
     'epoch_result': emit_epoch_result,
     'round_result': emit_round_result,
+    'process_result':emit_process_result,
     'training_completed': emit_process_completed,
     'training_error': emit_process_error
 }

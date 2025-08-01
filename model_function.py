@@ -293,7 +293,7 @@ def train_generic_dnn_model(train_dataloader, val_dataloader, test_dataloader, i
     criterion = LabelSmoothingCrossEntropy(smoothing=0.05)
 
     # 使用AdamW优化器，更稳定
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=float(lr), weight_decay=1e-4)
 
 
     best_model_state = None

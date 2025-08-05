@@ -2324,19 +2324,43 @@ def start_model_training():
             create_user_req, create_time_req
         ))
 
+        # query_insert_sample_link = """
+        # INSERT INTO tb_analysis_model_train_sample
+        # (model_train_id, from_sample_id, from_sample_type, create_user, create_time)
+        # VALUES (%s, %s, %s, %s, %s)
+        # """
+        # for item in sample_data_input_list:
+        #     individual_sample_id_in_request = item.get("from_sample_id")
+        #     sample_type_in_request = item.get("from_sample_type")
+        #     if individual_sample_id_in_request:
+        #         cursor.execute(query_insert_sample_link, (
+        #             current_training_instance_id, individual_sample_id_in_request,
+        #             sample_type_in_request, create_user_req, create_time_req
+        #         ))
+
         query_insert_sample_link = """
         INSERT INTO tb_analysis_model_train_sample
         (model_train_id, from_sample_id, from_sample_type, create_user, create_time)
         VALUES (%s, %s, %s, %s, %s)
         """
+
+        # 准备批量插入的数据列表
+        batch_insert_data = []
         for item in sample_data_input_list:
             individual_sample_id_in_request = item.get("from_sample_id")
             sample_type_in_request = item.get("from_sample_type")
-            if individual_sample_id_in_request:
-                cursor.execute(query_insert_sample_link, (
-                    current_training_instance_id, individual_sample_id_in_request,
-                    sample_type_in_request, create_user_req, create_time_req
+            if individual_sample_id_in_request:  # 只添加有效样本ID的数据
+                batch_insert_data.append((
+                    current_training_instance_id,
+                    individual_sample_id_in_request,
+                    sample_type_in_request,
+                    create_user_req,
+                    create_time_req
                 ))
+
+        # 执行批量插入（仅当有数据时）
+        if batch_insert_data:
+            cursor.executemany(query_insert_sample_link, batch_insert_data)
 
         conn.commit()
 
@@ -3540,9 +3564,44 @@ def get_apply_models():
             conn.close()
 
 
-#TODO：这周任务,目前问题没有处理数据结构
+
 from model_function import GenericDNN
 from model_function import create_windows_1d,create_windows_wavelet
+
+
+# 8.5新增模型应用文件选择接口
+@app.route('/api/analysis/apply/gather/files', methods=['GET'])
+@token_required
+def get_file_identifier():
+    conn = None
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return jsonify({"state": 500, "message": "Failed to connect to the database"})
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT file_id, file_name FROM tb_analysis_apply_file")
+        files = cursor.fetchall()
+
+        if files:
+            file_list = []
+            for file in files:
+                file_list.append({"file_id": file[0], "file_name": file[1]})
+            data = {"files": file_list}
+            return jsonify({"state": 200, "data": data})
+        else:
+            return jsonify({"state": 404, "message": "No files found"})
+
+    except Error as e:
+        if conn:
+            conn.rollback()
+        return jsonify({"state": 500, "message": f"Database error: {e}"})
+    except Exception as e:
+        return jsonify({"state": 500, "message": str(e)})
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
 
 
 @app.route('/api/analysis/apply/check/start', methods=['POST'])

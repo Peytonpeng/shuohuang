@@ -3631,6 +3631,9 @@ def start_analysis():
         model_artifact_path_prefix = data.get('model_artifact_path')
         model_train_name = data.get('model_train_name')
         apply_sample_ids = data.get('apply_sample_ids')
+        room_id = session.get('room_id')
+        if not room_id:
+            logger.warning("预处理操作未找到有效的room ID，将无法通过WebSocket发送进度")
 
         if not all([model_train_id, model_artifact_path_prefix, model_train_name, apply_sample_ids is not None]):
             return jsonify({"state": 400,
@@ -3658,6 +3661,8 @@ def start_analysis():
             if not rows:
                 return jsonify({"state": 404, "message": f"未找到ID为 {apply_sample_ids} 的样本数据"}), 404
 
+            total_samples = len(rows)
+            loaded_count = 0
             for row in rows:
                 sample_id = row['apply_sample_id']
                 raw_sample_data = row['sample_data']
@@ -3668,6 +3673,13 @@ def start_analysis():
                     parsed_list = json.loads(raw_sample_data) if isinstance(raw_sample_data, str) else raw_sample_data
                     if isinstance(parsed_list, list) and len(parsed_list) > 0:
                         input_data_map[sample_id] = parsed_list
+                        loaded_count += 1
+                        # 新增读取原始数据数据进度条
+                        emit_process_progress(room_id, 'apply', {
+                            'message': f'正在加载样本 {sample_id}',
+                            'current': loaded_count,
+                            'total': total_samples
+                        })
                     else:
                         print(f"警告: 样本ID {sample_id} 的数据解析后不是非空列表。跳过。")
                 except (json.JSONDecodeError, TypeError) as e:
@@ -3744,6 +3756,8 @@ def start_analysis():
         # --- 7. 对每个输入样本执行处理流程 ---
         all_final_features_for_model = []
         window_to_sample_id_map = []
+        total_samples = len(apply_sample_ids)
+        processed_count = 0  # 记录实际处理的样本数
 
         for sample_id in apply_sample_ids:
             if sample_id not in input_data_map:
@@ -3773,16 +3787,34 @@ def start_analysis():
                     print(f"信息: 样本ID {sample_id}，预处理方法 '{method_name}' 未在后端定义，已跳过。")
 
             if processed_data.size == 0: continue
+            processed_count += 1
+            # 新增预处理处理进度
+            emit_process_progress(room_id, 'apply', {
+                'message': f'样本 {sample_id} 预处理完成',
+                'current': processed_count,
+                'total': total_samples
+            })
 
             # --- 7.2. 应用特征提取 (已优化) ---
             # --- 优化点: 如果方法未找到，则直接使用预处理后的数据作为特征 ---
             extracted_features = None
+            total_feature_samples = len([sid for sid in apply_sample_ids if sid in input_data_map])
+            feature_processed_count = 0
             if feature_extract_method and feature_extract_method in feature_map:
                 print(f"信息: 样本ID {sample_id}，正在执行特征提取 '{feature_extract_method}'。")
                 try:
                     extracted_features = feature_map[feature_extract_method](processed_data)
                     if not isinstance(extracted_features, np.ndarray):
                         extracted_features = np.array(extracted_features, dtype=np.float32)
+
+                    # 新增特征处理进度条
+                    feature_processed_count += 1
+                    emit_process_progress(room_id, 'apply', {
+                        'message': f'样本 {sample_id} 特征提取完成',
+                        'current': feature_processed_count,
+                        'total': total_feature_samples
+                    })
+
                 except Exception as e:
                     import traceback
                     print(

@@ -689,6 +689,10 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
     svc_kernel = param_data.get("svc_kernel", 'rbf')
     svc_gamma = param_data.get("svc_gamma", 'scale')
     lr_fit_intercept = param_data.get("lr_fit_intercept", True)
+    # 针对字符串类型进行转换
+    if isinstance(lr_fit_intercept, str):
+        # 统一转为小写后判断，兼容 'True'/'TRUE'/'false' 等各种大小写形式
+        lr_fit_intercept = lr_fit_intercept.lower() == "true"
     kmeans_n_clusters_param = param_data.get("kmeans_n_clusters", 5)
     dnn_hidden_dims = param_data.get("dnn_hidden_dims", [128, 64])
     dnn_dropout_rate = param_data.get("dnn_dropout_rate", 0.3)
@@ -844,34 +848,40 @@ def train_model(json_data, label_column, model_name, param_data, training_id=Non
                                       {'status': 'training_complete', 'message': f'{model_name} 训练完成。',
                                        'progress_percent': 90})
 
-                # Scikit-learn模型没有epoch概念，这里模拟一个简单的训练结果
-                y_pred_train = model_instance.predict(X_train_for_model)
-                train_acc = accuracy_score(y_train, y_pred_train) if model_name != '线性回归' else None
+                train_metric = None
+                val_metric = None
 
-                # 验证集评估（为了选择最佳模型或监控过拟合，但这里没有迭代训练，所以只是展示）
-                val_acc = None
-                if X_val_for_model.size > 0 and (model_name == 'K-均值聚类' or y_val.size > 0):
-                    if model_name != 'K-均值聚类':
+                # 针对不同模型类型使用不同的评估指标
+                if model_name == '线性回归':
+                    # 线性回归使用均方误差 (MSE)
+                    y_pred_train = model_instance.predict(X_train_for_model)
+                    train_metric = mean_squared_error(y_train, y_pred_train)
+
+                    if X_val_for_model.size > 0 and y_val.size > 0:
                         y_pred_val = model_instance.predict(X_val_for_model)
-                        val_acc = accuracy_score(y_val, y_pred_val)
-                    else:
-                        # K-Means 对验证集进行预测，然后评估轮廓系数
-                        labels_pred_val = model_instance.predict(X_val_for_model)
-                        if X_val_for_model.shape[0] > 1 and model_instance.n_clusters > 1 and len(np.unique(labels_pred_val)) > 1:
-                            val_acc = silhouette_score(X_val_for_model, labels_pred_val)
-                        else:
-                            val_acc = 0.0 # 无法计算
+                        val_metric = mean_squared_error(y_val, y_pred_val)
 
-                result_metrics = {
-                    '训练时间': time.time() - start_time,
-                    '训练准确率': train_acc,
-                    '验证准确率': val_acc,
-                    'message': f'{model_name} 训练完成'
-                }
-                if model_name == 'K-均值聚类':
-                    result_metrics['验证轮廓系数'] = val_acc
-                    if hasattr(model_instance, 'cluster_centers_'):
-                        result_metrics['聚类中心'] = model_instance.cluster_centers_.tolist()
+                    result_metrics = {
+                        '训练时间': time.time() - start_time,
+                        '训练均方误差': train_metric,
+                        '验证均方误差': val_metric,
+                        'message': f'{model_name} 训练完成'
+                    }
+                else:
+                    # 分类模型使用准确率
+                    y_pred_train = model_instance.predict(X_train_for_model)
+                    train_metric = accuracy_score(y_train, y_pred_train)
+
+                    if X_val_for_model.size > 0 and y_val.size > 0:
+                        y_pred_val = model_instance.predict(X_val_for_model)
+                        val_metric = accuracy_score(y_val, y_pred_val)
+
+                    result_metrics = {
+                        '训练时间': time.time() - start_time,
+                        '训练准确率': train_metric,
+                        '验证准确率': val_metric,
+                        'message': f'{model_name} 训练完成'
+                    }
 
             elif model_name == 'K-均值聚类':
                 if stop_event and stop_event.is_set():

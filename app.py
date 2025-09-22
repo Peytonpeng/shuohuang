@@ -305,206 +305,421 @@ def token():
         return jsonify(value)
 
 
+# @app.route('/api/analysis/train/select/import', methods=['POST'])
+# @token_required
+# def import_selection_file():
+#     """
+#     文件上传接口：
+#     - 参数：
+#       - file: 上传的文件
+#     - 响应：
+#       - 成功返回文件标识符 (file_id)
+#       - 失败返回错误信息
+#     """
+#     try:
+#         # 检查是否有文件上传
+#         if 'file' not in request.files:
+#             return jsonify({"state": 400, "message": "未提供上传文件"}), 400
+#
+#         file = request.files['file']
+#         # 检查文件名是否为空
+#         if file.filename == '':
+#             return jsonify({"state": 400, "message": "未选择文件"}), 400
+#
+#         original_filename = file.filename  # 获取原始文件名
+#         file_id = str(uuid.uuid4())  # 生成唯一的文件标识符
+#         server_filename = f"{file_id}"  # 服务器上存储的文件名使用 file_id
+#         file_path = os.path.join(UPLOAD_FOLDER, server_filename)
+#
+#         # 检查原始文件名是否已存在于数据库中
+#         conn = get_db_connection()
+#         if conn is None:
+#             return jsonify({"state": 500, "message": "数据库连接失败"}), 500
+#
+#         try:
+#             cursor = conn.cursor()
+#             check_sql = "SELECT file_id FROM tb_analysis_sample_file WHERE file_name = %s"
+#             cursor.execute(check_sql, (original_filename,))
+#             existing_file = cursor.fetchone()
+#             if existing_file:
+#                 return jsonify({"state": 409, "message": f"文件名 '{original_filename}' 已存在"}), 409
+#         except Exception as e:
+#             cursor.close()
+#             conn.close()
+#             return jsonify({"state": 500, "message": f"数据库查询失败: {str(e)}"}), 500
+#         finally:
+#             if conn:
+#                 cursor.close()
+#
+#         # 保存文件到服务器，使用 file_id 作为文件名
+#         try:
+#             file.save(file_path)
+#         except Exception as e:
+#             if conn:
+#                 conn.close()
+#             return jsonify({"state": 500, "message": f"文件保存失败: {str(e)}"}), 500
+#
+#         # 读取 CSV
+#         try:
+#             df = pd.read_csv(file_path)
+#         except FileNotFoundError:
+#             if conn:
+#                 conn.close()
+#             os.remove(file_path)  # 删除已保存但读取失败的文件
+#             return jsonify({"state": 404, "message": "文件未找到"}), 404
+#         except pd.errors.ParserError:
+#             if conn:
+#                 conn.close()
+#             os.remove(file_path)  # 删除已保存但解析失败的文件
+#             return jsonify({"state": 400, "message": "CSV 解析失败"}), 400
+#
+#         # 插入数据库，file_name 存储原始文件名
+#         try:
+#             cursor = conn.cursor()
+#             sql = """
+#             INSERT INTO tb_analysis_sample_file (file_id, file_name, file_path, demo, create_user, create_time)
+#             VALUES (%s, %s, %s, %s, %s, %s)
+#             """
+#             cursor.execute(sql, (file_id, original_filename, file_path, "自动上传", "admin", datetime.datetime.now()))
+#             conn.commit()
+#             return jsonify({"state": 200, "data": {"file_id": file_id}}), 200
+#         except Exception as e:
+#             conn.rollback()
+#             os.remove(file_path)  # 删除已保存但数据库插入失败的文件
+#             return jsonify({"state": 500, "message": f"数据库操作失败: {str(e)}"}), 500
+#         finally:
+#             if conn:
+#                 cursor.close()
+#                 conn.close()
+#
+#     except Exception as e:
+#         return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
+
 @app.route('/api/analysis/train/select/import', methods=['POST'])
-@token_required
+# @token_required
+#9.22日测试选取多个文件
 def import_selection_file():
     """
-    文件上传接口：
+    文件上传接口（支持多文件）：
     - 参数：
-      - file: 上传的文件
+      - file: 上传的一个或多个文件
     - 响应：
-      - 成功返回文件标识符 (file_id)
+      - 成功返回包含所有成功上传文件信息（file_id, file_name）的列表
       - 失败返回错误信息
     """
     try:
-        # 检查是否有文件上传
-        if 'file' not in request.files:
+        # 1. 修改为 getlist 来接收多个文件
+        uploaded_files = request.files.getlist('file')
+
+        if not uploaded_files or all(f.filename == '' for f in uploaded_files):
             return jsonify({"state": 400, "message": "未提供上传文件"}), 400
 
-        file = request.files['file']
-        # 检查文件名是否为空
-        if file.filename == '':
-            return jsonify({"state": 400, "message": "未选择文件"}), 400
-
-        original_filename = file.filename  # 获取原始文件名
-        file_id = str(uuid.uuid4())  # 生成唯一的文件标识符
-        server_filename = f"{file_id}"  # 服务器上存储的文件名使用 file_id
-        file_path = os.path.join(UPLOAD_FOLDER, server_filename)
-
-        # 检查原始文件名是否已存在于数据库中
         conn = get_db_connection()
         if conn is None:
             return jsonify({"state": 500, "message": "数据库连接失败"}), 500
 
-        try:
-            cursor = conn.cursor()
-            check_sql = "SELECT file_id FROM tb_analysis_sample_file WHERE file_name = %s"
-            cursor.execute(check_sql, (original_filename,))
-            existing_file = cursor.fetchone()
-            if existing_file:
-                return jsonify({"state": 409, "message": f"文件名 '{original_filename}' 已存在"}), 409
-        except Exception as e:
-            cursor.close()
-            conn.close()
-            return jsonify({"state": 500, "message": f"数据库查询失败: {str(e)}"}), 500
-        finally:
-            if conn:
-                cursor.close()
+        success_files = []
+        errors = []
 
-        # 保存文件到服务器，使用 file_id 作为文件名
-        try:
-            file.save(file_path)
-        except Exception as e:
-            if conn:
-                conn.close()
-            return jsonify({"state": 500, "message": f"文件保存失败: {str(e)}"}), 500
+        # 2. 循环处理每一个上传的文件
+        for file in uploaded_files:
+            if file.filename == '':
+                continue
 
-        # 读取 CSV
-        try:
-            df = pd.read_csv(file_path)
-        except FileNotFoundError:
-            if conn:
-                conn.close()
-            os.remove(file_path)  # 删除已保存但读取失败的文件
-            return jsonify({"state": 404, "message": "文件未找到"}), 404
-        except pd.errors.ParserError:
-            if conn:
-                conn.close()
-            os.remove(file_path)  # 删除已保存但解析失败的文件
-            return jsonify({"state": 400, "message": "CSV 解析失败"}), 400
+            original_filename = file.filename
+            file_path = None  # 初始化变量
 
-        # 插入数据库，file_name 存储原始文件名
-        try:
-            cursor = conn.cursor()
-            sql = """
-            INSERT INTO tb_analysis_sample_file (file_id, file_name, file_path, demo, create_user, create_time)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """
-            cursor.execute(sql, (file_id, original_filename, file_path, "自动上传", "admin", datetime.datetime.now()))
-            conn.commit()
-            return jsonify({"state": 200, "data": {"file_id": file_id}}), 200
-        except Exception as e:
-            conn.rollback()
-            os.remove(file_path)  # 删除已保存但数据库插入失败的文件
-            return jsonify({"state": 500, "message": f"数据库操作失败: {str(e)}"}), 500
-        finally:
-            if conn:
-                cursor.close()
-                conn.close()
+            try:
+                cursor = conn.cursor()
+                # 检查文件名是否已存在
+                check_sql = "SELECT file_id FROM tb_analysis_sample_file WHERE file_name = %s"
+                cursor.execute(check_sql, (original_filename,))
+                if cursor.fetchone():
+                    errors.append({"filename": original_filename, "message": "文件名已存在"})
+                    cursor.close()
+                    continue
+
+                file_id = str(uuid.uuid4())
+                server_filename = f"{file_id}"
+                file_path = os.path.join(UPLOAD_FOLDER, server_filename)
+
+                # 保存文件
+                file.save(file_path)
+
+                # 简单验证CSV文件可读性
+                pd.read_csv(file_path, nrows=1)
+
+                # 插入数据库
+                sql = """
+                INSERT INTO tb_analysis_sample_file (file_id, file_name, file_path, demo, create_user, create_time)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """
+                cursor.execute(sql,
+                               (file_id, original_filename, file_path, "自动上传", "admin", datetime.datetime.now()))
+
+                success_files.append({"file_id": file_id, "file_name": original_filename})
+
+            except pd.errors.ParserError:
+                errors.append({"filename": original_filename, "message": "CSV 解析失败"})
+                if file_path and os.path.exists(file_path): os.remove(file_path)  # 清理无法解析的文件
+            except Exception as e:
+                errors.append({"filename": original_filename, "message": f"处理失败: {str(e)}"})
+                if file_path and os.path.exists(file_path): os.remove(file_path)  # 清理失败的文件
+            finally:
+                if 'cursor' in locals() and cursor and not cursor.closed:
+                    cursor.close()
+
+        # 提交所有成功的事务
+        conn.commit()
+
+        # 3. 返回处理结果
+        if not success_files and errors:
+            return jsonify({"state": 500, "message": "所有文件处理失败", "errors": errors}), 500
+
+        return jsonify({
+            "state": 200,
+            "data": {
+                "success": success_files,
+                "errors": errors
+            }
+        }), 200
 
     except Exception as e:
+        if 'conn' in locals() and conn:
+            conn.rollback()
         return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
 
+
+
+
+# @app.route('/api/analysis/train/select/sample', methods=['GET'])
+# @token_required
+# def get_sample_data():
+#     file_id = request.args.get('file_id')
+#     create_user = request.args.get('create_user', 'system')
+#
+#     if not file_id:
+#         return jsonify({"state": 400, "message": "未提供文件标识符"}), 400
+#
+#     conn = None
+#     cursor = None
+#     try:
+#         conn = get_db_connection()
+#         if conn is None:
+#             return jsonify({"state": 500, "message": "数据库连接失败"}), 500
+#
+#         cursor = conn.cursor()
+#
+#         # 查询是否已存在该 file_id 的原始样本数据
+#         cursor.execute("SELECT original_sample_id, sample_name FROM tb_analysis_sample_original WHERE file_id = %s",
+#                        (file_id,))
+#         existing_samples = cursor.fetchall()
+#
+#         if existing_samples:
+#             data_to_return = [{"sample_id": sample_id, "sample_name": sample_name} for sample_id, sample_name in
+#                               existing_samples]
+#             return jsonify({
+#                 "state": 200,
+#                 "data": data_to_return,
+#                 "message": f"文件标识符 {file_id} 的样本数据已存在，已返回现有数据。"
+#             }), 200
+#         else:
+#             # 查询文件路径
+#             cursor.execute("SELECT file_path FROM tb_analysis_sample_file WHERE file_id = %s", (file_id,))
+#             result = cursor.fetchone()
+#
+#             if not result:
+#                 return jsonify({"state": 404, "message": "未找到对应的文件"}), 404
+#
+#             file_path = result[0]
+#             if not os.path.exists(file_path):
+#                 return jsonify({"state": 404, "message": "文件不存在"}), 404
+#
+#             df = None
+#             # 读取 CSV 数据
+#             try:
+#                 df = pd.read_csv(file_path)
+#                 # 删除所有列都是NaN的行
+#                 df.dropna(how='all', inplace=True)
+#                 # 接下来再将剩余的 NaN 填充为空字符串（针对有效数据中的个别NaN）
+#                 df.fillna('', inplace=True)
+#
+#             except Exception as e:
+#                 return jsonify({"state": 500, "message": f"读取或处理CSV文件失败: {str(e)}"}), 500
+#
+#             sample_list = []
+#             data_to_return = []
+#             file_uuid = str(uuid.uuid4())  # 为当前文件生成一个 UUID
+#
+#             for i, col_name in enumerate(df.columns):
+#                 # 生成 original_sample_id
+#                 original_sample_id = f"{file_uuid}_{i + 1}"
+#
+#                 # 生成唯一的 sample_name
+#                 sample_name = f"{col_name}"
+#
+#                 # 直接获取列数据作为列表
+#                 sample_data_list = df[col_name].tolist()
+#                 # 将 Python 列表转换为 JSON 字符串
+#                 sample_data_json = json.dumps(sample_data_list)
+#
+#                 data_to_return.append({
+#                     "sample_id": original_sample_id,
+#                     "sample_name": col_name
+#                 })
+#
+#                 sample_list.append((
+#                     original_sample_id, file_id, sample_name, sample_data_json, '1', create_user
+#                 ))
+#
+#             # 批量插入数据
+#             insert_query = """
+#             INSERT INTO tb_analysis_sample_original (
+#                 original_sample_id, file_id, sample_name, sample_data, sample_state, create_user, create_time
+#             ) VALUES (%s, %s, %s, %s, %s, %s, NOW());
+#             """
+#             cursor.executemany(insert_query, sample_list)
+#             conn.commit()
+#
+#             return jsonify({
+#                 "state": 200,
+#                 "data": data_to_return
+#             }), 200
+#
+#     except psycopg2.Error as e:
+#         if conn:
+#             conn.rollback()
+#         return jsonify({"state": 500, "message": f"PostgreSQL 操作失败: {str(e)}"}), 500
+#     except Exception as e:
+#         if conn:
+#             conn.rollback()
+#         return jsonify({"state": 500, "message": f"操作失败: {str(e)}"}), 500
+#
+#     finally:
+#         if conn:
+#             if cursor:
+#                 cursor.close()
+#             conn.close()
 
 @app.route('/api/analysis/train/select/sample', methods=['GET'])
-@token_required
+#9.22日测试选取多个文件
+# @token_required
 def get_sample_data():
-    file_id = request.args.get('file_id')
+    """
+    根据一个或多个 file_id，获取其下所有样本/通道信息
+    - 参数:
+      - file_ids: 逗号分隔的文件ID字符串
+    - 响应:
+      - 按文件分组的样本列表
+    """
+    # 1. 参数从 file_id 改为 file_ids，接收逗号分隔的字符串
+    file_ids_str = request.args.get('file_ids')
     create_user = request.args.get('create_user', 'system')
 
-    if not file_id:
+    if not file_ids_str:
         return jsonify({"state": 400, "message": "未提供文件标识符"}), 400
+
+    file_ids = [fid.strip() for fid in file_ids_str.split(',') if fid.strip()]
+    if not file_ids:
+        return jsonify({"state": 400, "message": "文件标识符格式无效"}), 400
 
     conn = None
     cursor = None
+
+    # 2. 准备一个列表来存储所有文件的结果
+    all_files_data = []
+
     try:
         conn = get_db_connection()
         if conn is None:
             return jsonify({"state": 500, "message": "数据库连接失败"}), 500
-
         cursor = conn.cursor()
 
-        # 查询是否已存在该 file_id 的原始样本数据
-        cursor.execute("SELECT original_sample_id, sample_name FROM tb_analysis_sample_original WHERE file_id = %s",
-                       (file_id,))
-        existing_samples = cursor.fetchall()
+        # 3. 循环处理每一个 file_id
+        for file_id in file_ids:
+            # 查询文件名
+            cursor.execute("SELECT file_name FROM tb_analysis_sample_file WHERE file_id = %s", (file_id,))
+            file_info = cursor.fetchone()
+            file_name = file_info[0] if file_info else "未知文件"
 
-        if existing_samples:
-            data_to_return = [{"sample_id": sample_id, "sample_name": sample_name} for sample_id, sample_name in
-                              existing_samples]
-            return jsonify({
-                "state": 200,
-                "data": data_to_return,
-                "message": f"文件标识符 {file_id} 的样本数据已存在，已返回现有数据。"
-            }), 200
-        else:
-            # 查询文件路径
+            # 查询是否已存在该 file_id 的原始样本数据
+            cursor.execute("SELECT original_sample_id, sample_name FROM tb_analysis_sample_original WHERE file_id = %s",
+                           (file_id,))
+            existing_samples = cursor.fetchall()
+
+            file_data = {
+                "file_id": file_id,
+                "file_name": file_name,
+                "samples": []
+            }
+
+            if existing_samples:
+                file_data["samples"] = [{"sample_id": sample_id, "sample_name": sample_name} for sample_id, sample_name
+                                        in existing_samples]
+                all_files_data.append(file_data)
+                continue  # 处理下一个 file_id
+
+            # --- 如果样本不存在，则读取文件并生成 ---
             cursor.execute("SELECT file_path FROM tb_analysis_sample_file WHERE file_id = %s", (file_id,))
             result = cursor.fetchone()
 
-            if not result:
-                return jsonify({"state": 404, "message": "未找到对应的文件"}), 404
+            if not result or not os.path.exists(result[0]):
+                file_data["error"] = "文件路径未找到或文件不存在"
+                all_files_data.append(file_data)
+                continue
 
             file_path = result[0]
-            if not os.path.exists(file_path):
-                return jsonify({"state": 404, "message": "文件不存在"}), 404
 
-            df = None
-            # 读取 CSV 数据
             try:
                 df = pd.read_csv(file_path)
-                # 删除所有列都是NaN的行
                 df.dropna(how='all', inplace=True)
-                # 接下来再将剩余的 NaN 填充为空字符串（针对有效数据中的个别NaN）
                 df.fillna('', inplace=True)
-
             except Exception as e:
-                return jsonify({"state": 500, "message": f"读取或处理CSV文件失败: {str(e)}"}), 500
+                file_data["error"] = f"读取或处理CSV文件失败: {str(e)}"
+                all_files_data.append(file_data)
+                continue
 
-            sample_list = []
-            data_to_return = []
-            file_uuid = str(uuid.uuid4())  # 为当前文件生成一个 UUID
+            sample_list_to_insert = []
+            file_uuid = str(uuid.uuid4())
 
             for i, col_name in enumerate(df.columns):
-                # 生成 original_sample_id
                 original_sample_id = f"{file_uuid}_{i + 1}"
-
-                # 生成唯一的 sample_name
                 sample_name = f"{col_name}"
-
-                # 直接获取列数据作为列表
                 sample_data_list = df[col_name].tolist()
-                # 将 Python 列表转换为 JSON 字符串
                 sample_data_json = json.dumps(sample_data_list)
 
-                data_to_return.append({
-                    "sample_id": original_sample_id,
-                    "sample_name": col_name
-                })
+                file_data["samples"].append({"sample_id": original_sample_id, "sample_name": col_name})
 
-                sample_list.append((
+                sample_list_to_insert.append((
                     original_sample_id, file_id, sample_name, sample_data_json, '1', create_user
                 ))
 
-            # 批量插入数据
-            insert_query = """
-            INSERT INTO tb_analysis_sample_original (
-                original_sample_id, file_id, sample_name, sample_data, sample_state, create_user, create_time
-            ) VALUES (%s, %s, %s, %s, %s, %s, NOW());
-            """
-            cursor.executemany(insert_query, sample_list)
-            conn.commit()
+            if sample_list_to_insert:
+                insert_query = """
+                INSERT INTO tb_analysis_sample_original (
+                    original_sample_id, file_id, sample_name, sample_data, sample_state, create_user, create_time
+                ) VALUES (%s, %s, %s, %s, %s, %s, NOW());
+                """
+                cursor.executemany(insert_query, sample_list_to_insert)
 
-            return jsonify({
-                "state": 200,
-                "data": data_to_return
-            }), 200
+            all_files_data.append(file_data)
+
+        conn.commit()
+        return jsonify({"state": 200, "data": all_files_data}), 200
 
     except psycopg2.Error as e:
-        if conn:
-            conn.rollback()
+        if conn: conn.rollback()
         return jsonify({"state": 500, "message": f"PostgreSQL 操作失败: {str(e)}"}), 500
     except Exception as e:
-        if conn:
-            conn.rollback()
+        if conn: conn.rollback()
         return jsonify({"state": 500, "message": f"操作失败: {str(e)}"}), 500
-
     finally:
         if conn:
-            if cursor:
-                cursor.close()
+            if cursor and not cursor.closed: cursor.close()
             conn.close()
-
 
 @app.route('/api/analysis/train/select/wave', methods=['GET'])
 @token_required
@@ -688,6 +903,7 @@ def add_sample_data():
 
 
 # 5.15新增接口，保证后续所有的步骤仅仅使用某一个文件的样本
+# 可能没有用了啊
 @app.route('/api/analysis/train/select/files', methods=['GET'])
 @token_required
 def get_file_identifiers():

@@ -3051,111 +3051,6 @@ def import_apply_file():
         # 捕获所有其他未知异常
         return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
 
-
-# # 5.12新增AI模型应用接口：
-# # 这个接口不懂什么意思？
-# @app.route('/api/analysis/apply/gather/check', methods=['GET'])
-# @token_required
-# def check_apply_file():
-#     """
-#     在线检查样本数据接口。
-#     根据 file_id 检查文件是否存在于数据库中以及文件是否在服务器上。
-#
-#     参数:
-#       - file_id (str): 文件标识符
-#
-#     返回:
-#       JSON: 包含检查结果的JSON响应
-#     """
-#     conn = None
-#     cursor = None
-#     try:
-#         file_id = request.args.get('file_id')
-#
-#         if not file_id:
-#             return jsonify({
-#                 "state": 400,
-#                 "data": {
-#                     "success": "false",
-#                     "message": "未提供文件标识符"
-#                 }
-#             }), 400
-#
-#         conn = get_db_connection()
-#         if conn is None:
-#             return jsonify({
-#                 "state": 500,
-#                 "data": {
-#                     "success": "false",
-#                     "message": "数据库连接失败"
-#                 }
-#             }), 500
-#
-#         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-#
-#         # 1. 检查文件ID是否存在于数据库中
-#         sql_query = "SELECT file_path FROM tb_analysis_apply_file WHERE file_id = %s"
-#         cursor.execute(sql_query, (file_id,))
-#         result = cursor.fetchone()
-#
-#         if not result:
-#             return jsonify({
-#                 "state": 404,
-#                 "data": {
-#                     "success": "false",
-#                     "message": f"文件标识符 '{file_id}' 不存在于数据库中。"
-#                 }
-#             }), 404  # 根据图片要求，返回 404 表示失败
-#
-#         file_path = result['file_path']
-#
-#         # 2. 检查文件是否存在于服务器文件系统中
-#         if not os.path.exists(file_path):
-#             return jsonify({
-#                 "state": 404,
-#                 "data": {
-#                     "success": "false",
-#                     "message": f"文件 '{file_path}' 在服务器上不存在或已被移动。"
-#                 }
-#             }), 404  # 根据图片要求，返回 404 表示失败
-#
-#         # 3. (可选) 检查文件是否为空或损坏，这里只进行简单的大小检查
-#         if os.path.getsize(file_path) == 0:
-#             return jsonify({
-#                 "state": 400,  # 文件内容问题，可以返回 400 Bad Request
-#                 "data": {
-#                     "success": "false",
-#                     "message": f"文件 '{file_path}' 为空，无有效数据。"
-#                 }
-#             }), 400
-#
-#         # 所有检查通过
-#         return jsonify({
-#             "state": 200,
-#             "data": {
-#                 "success": "true",
-#                 "message": "文件数据检查通过，文件有效且可访问。"
-#             }
-#         }), 200
-#
-#     except Exception as e:
-#         # 捕获其他任何服务器内部错误
-#         return jsonify({
-#             "state": 500,
-#             "data": {
-#                 "success": "false",
-#                 "message": f"服务器内部错误: {str(e)}"
-#             }
-#         }), 500
-#     finally:
-#         if cursor:
-#             cursor.close()
-#         if conn:
-#             conn.close()
-
-
-
-
 import math
 @app.route('/api/analysis/apply/gather/sample', methods=['GET'])
 @token_required
@@ -3356,12 +3251,6 @@ def get_apply_sample_data():
         if conn:
             conn.close()
         print("DEBUG: Database connection closed.")
-
-
-
-
-
-
 
 
 @app.route('/api/analysis/apply/gather/wave', methods=['GET'])
@@ -4089,6 +3978,3 @@ def index():
 if __name__ == '__main__':
     print("开始启动服务...")
     socketio.run(app, host='0.0.0.0', port=5001, debug=True, allow_unsafe_werkzeug=True)
-
-
-

@@ -950,3 +950,53 @@ def add_apply_sample_to_library():
         if conn:
             conn.close()
 
+@apply_bp.route('/check/model', methods=['GET'])
+@token_required
+def get_apply_models():
+    """
+    获取模型训练数据列表 (用于分析应用模块的模型选择)
+    - 参数：无
+    - 响应：
+      - 成功返回模型训练名称、model_train_id、模型构件路径
+      - 失败返回错误信息 (例如 404 表示未找到任何模型)
+    """
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return jsonify({"state": 500, "message": "数据库连接失败"}), 500
+
+        # 使用 DictCursor 使得查询结果可以通过字段名访问
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # 直接查询 tb_analysis_model_train 表，获取 model_train_name, model_id, model_artifact_path
+        sql_query = """
+            SELECT
+                model_train_name,
+                model_train_id,
+                model_artifact_path
+            FROM
+                tb_analysis_model_train
+        """
+        cursor.execute(sql_query)
+        models = cursor.fetchall()  # 获取所有查询结果
+
+        if not models:
+            # 如果未找到任何模型训练数据，返回 state 404
+            return jsonify({"state": 404, "data": [], "message": "未找到任何模型训练数据"}), 404
+
+
+        # Flask 的 jsonify 通常可以直接处理 psycopg2.extras.DictRow 对象列表
+        return jsonify({"state": 200, "data": models}), 200
+
+    except Exception as e:
+        # 捕获任何服务器内部错误
+        print(f"获取模型训练数据失败: {str(e)}")  # 打印错误以便调试
+        return jsonify({"state": 500, "message": f"服务器内部错误: {str(e)}"}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
